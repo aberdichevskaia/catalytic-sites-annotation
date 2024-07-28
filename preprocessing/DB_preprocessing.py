@@ -9,12 +9,13 @@ from Bio import pairwise2
 import networkx as nx
 import numpy as np
 
+import pickle
+import re
+
 pdbl = PDBList()
 parser = MMCIFParser()
 ppb = PPBuilder()
 
-proteins_filenames = dict()
-proteins_structures = dict()
 
 def get_chains_sequences(structure, chain_ids):
     sequences = []
@@ -34,17 +35,9 @@ def get_chains_sequences(structure, chain_ids):
 
 
 def parse_biological_assembly(pdb_id):
-    if not pdb_id in proteins_structures:
-        if not pdb_id in proteins_filenames:
-            cif_filename = pdbl.retrieve_pdb_file(pdb_id, file_format='mmCif', pdir='../../pdb_files/')
-            proteins_filenames[pdb_id] = cif_filename
-        else:
-            cif_filename = proteins_filenames[pdb_id]
-        structure = parser.get_structure(pdb_id, cif_filename)
-        proteins_structures[pdb_id] = structure
-        return structure
-    else:
-        return proteins_structures[pdb_id]
+    cif_filename = pdbl.retrieve_pdb_file(pdb_id, file_format='mmCif', pdir='../../pdb_files/')
+    structure = parser.get_structure(pdb_id, cif_filename)
+    return structure
 
 
 def chains_are_in_contact(chain1, chain2, threshold_c_alpha=8.0, threshold_heavy=4.0):
@@ -86,9 +79,12 @@ def choose_representative_chains(structure, chain_ids):
                 chain2 = structure[0][chain_id2]
                 if chains_are_in_contact(chain1, chain2):
                     contact_graph.add_edge(chain_id1, chain_id2)
-    
+
+    if contact_graph.number_of_nodes() == 0:
+        return [chain_ids[0]] 
+
     largest_component = max(nx.connected_components(contact_graph), key=len)
-    representative_chains = list(largest_component)
+    representative_chains = list(largest_component) #????
     return representative_chains
 
 
@@ -102,19 +98,19 @@ def map_catalytic_sites(uniprot_seq, pdb_seq, uniprot_catalytic_sites):
     pdb_catalytic_sites = [0] * len(pdb_seq)
 
     uniprot_index, pdb_index = 0, 0
-    for a, b in zip(uniprot_seq, pdb_seq):
+    for a, b in zip(uniprot_aligned, pdb_aligned):
         if a != '-' and b != '-':
             pdb_catalytic_sites[pdb_index] = uniprot_catalytic_sites[uniprot_index]
             uniprot_index += 1
             pdb_index += 1
         elif a == '-' and b != '-':
-            pdb_sequence += 1
+            pdb_index += 1
         elif a != '-' and b == '-':
             uniprot_index += 1
     return pdb_catalytic_sites
 
 
-def output_sequence(protein_id, chain, positions, sequence, catalytic_sites):
+def output_sequence(output, protein_id, chain, positions, sequence, catalytic_sites):
     output.append(f">{protein_id}_{chain}")
     for position, amino_acid, is_catalytic_site in zip(positions, list(sequence), catalytic_sites):
         output.append(f"{chain} {position} {amino_acid} {is_catalytic_site}")    
@@ -127,44 +123,64 @@ def analyze_PDB_reference(pdb_id, chain_ids):
     return get_chains_sequences(structure, chain_ids)
 
 
+def parse_chain_ranges(chain_ranges: str):
+    chain_dict = {}
+    chains = re.split(r',\s*', chain_ranges)
+    for chain in chains:
+        chain_id, ranges = chain.split('=')
+        start, end = map(int, ranges.split('-'))
+        chain_dict[chain_id] = (start, end)
+    return chain_dict
 
 
+def process_batch(data_batch, batch_num):
+    output = []
 
-with open('/a/home/cc/students/cs/annab4/uniprot_files/P0AEE3.json') as f:
-    data = json.load(f)
+    for result in data_batch:
+        uniprot_sequence = result['sequence']['value']
+        features = result['features']
+        primary_accession = result['primaryAccession']
+        uniprot_catalytic_sites = [0] * len(uniprot_sequence)
+
+        for feature in features:
+            if feature['type'] == 'Active site':
+                start = feature['location']['start']['value']
+                end = feature['location']['end']['value']
+                for pos in range(start, end+1):
+                    uniprot_catalytic_sites[pos-1] = 1
+
+        output_sequence(output, protein_id=primary_accession, chain='A', positions=range(1, len(uniprot_sequence)+1), 
+                        sequence=uniprot_sequence, catalytic_sites=uniprot_catalytic_sites)
+        
+        cross_references = result['uniProtKBCrossReferences']
+        for cross_reference in cross_references:
+            if cross_reference['database'] == 'PDB':
+                pdb_id = cross_reference['id']
+                reference_chains_properties = parse_chain_ranges(cross_reference['properties'][2]['value'])
+                for chain_id, (fr, to) in reference_chains_properties.items():
+                    fr, to = fr - 1, to - 1
+                    sequences = analyze_PDB_reference(pdb_id, [chain_id])
+                    if not sequences:
+                        continue 
+                    for chain_id, pdb_sequence, pdb_positions in sequences:
+                        pdb_catalytic_sites = map_catalytic_sites(uniprot_sequence[fr:to], pdb_sequence, uniprot_catalytic_sites[fr:to])
+                        output_sequence(output, protein_id=pdb_id, chain=chain_id, positions=pdb_positions, 
+                                        sequence=pdb_sequence, catalytic_sites=pdb_catalytic_sites)
+
+    output_file = f'../../DB/batch_{batch_num}_annotations.pkl'
+    with open(output_file, 'wb') as f:
+        pickle.dump(output, f)
 
 
-output = []
+if __name__ == "__main__":
+    with open('/specific/a/home/cc/students/cs/annab4/uniprot_files/active_sites_proteins.json') as f:
+        data = json.load(f)
 
-for result in data['results']:
-    uniprot_sequence = result['sequence']['value']
-    features = result['features']
-    primary_accession = result['primaryAccession']
-    uniprot_catalytic_sites = [0] * len(uniprot_sequence)
-    
-    for feature in features:
-        if feature['type'] == 'Active site':
-            start = feature['location']['start']['value']
-            end = feature['location']['end']['value']
-            for pos in range(start, end+1):
-                uniprot_catalytic_sites[pos-1] = 1
-    output_sequence(protein_id=primary_accession, chain='A', positions=range(1, len(uniprot_sequence)+1), 
-                    sequence=uniprot_sequence, catalytic_sites=uniprot_catalytic_sites)
-    cross_references = result['uniProtKBCrossReferences']
-    for cross_reference in cross_references:
-        if cross_reference['database'] == 'PDB':
-            pdb_id = cross_reference['id']
-            reference_chains_properties = cross_reference['properties'][2]['value'].split('=')
-            chain_ids = reference_chains_properties[0].split('/')
-            fr, to = map(int, reference_chains_properties[1].split('-'))
-            fr, to = fr - 1, to - 1
-            sequences = analyze_PDB_reference(pdb_id, chain_ids)
-            for chain_id, pdb_sequence, pdb_positions in sequences:
-                pdb_catalytic_sites = map_catalytic_sites(uniprot_sequence[fr:to], pdb_sequence, uniprot_catalytic_sites[fr:to])
-                output_sequence(protein_id=pdb_id, chain=chain_id, positions=pdb_positions, 
-                    sequence=pdb_sequence, catalytic_sites=pdb_catalytic_sites)
+    batch_size = 290
+    num_batches = (len(data['results']) + batch_size - 1) // batch_size  
 
-
-output_file = '../../DB/P0AEE3_annotations.txt'
-with open(output_file, 'w') as f:
-    f.write('\n'.join(output))
+    for i in range(num_batches):
+        batch_start = i * batch_size
+        batch_end = min((i + 1) * batch_size, len(data['results']))
+        data_batch = data['results'][batch_start:batch_end]
+        process_batch(data_batch, i + 1)
