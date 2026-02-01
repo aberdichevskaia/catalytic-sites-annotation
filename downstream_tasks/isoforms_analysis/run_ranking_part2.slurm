@@ -15,8 +15,8 @@ source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 conda activate struct_bio  
 
 
-PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/isoforms/rank_isoforms_part2.py \
-  --dump_npz /home/iscb/wolfson/annab4/outputs/isoforms_preds_hybrid.npz \
+PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/rank_isoforms_part2.py \
+  --dump_npz /home/iscb/wolfson/annab4/outputs/isoforms_preds_esm2.npz \
   --out_csv  /home/iscb/wolfson/annab4/outputs/isoforms_spread_scores.csv \
   --nproc 64 \
   --min_isoforms 2

@@ -40,8 +40,8 @@ import numpy as np
 import pandas as pd
 
 # ---------------- ScanNet_Ub in sys.path ----------------
-PROJECT_ROOT = "/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub/"
-if PROJECT_ROOT not in sys.path:
+PROJECT_ROOT = os.environ.get("SCANNET_PROJECT_ROOT")
+if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import predict_bindingsites  # noqa: E402
