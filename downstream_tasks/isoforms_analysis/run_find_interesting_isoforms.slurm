@@ -14,7 +14,8 @@
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 conda activate struct_bio
 
-python /home/iscb/wolfson/annab4/catalytic-sites-annotation/isoforms/find_interesting_isoforms.py \
+python /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/find_interesting_isoforms.py \
     --in_csv /home/iscb/wolfson/annab4/outputs/human_isoforms_screen_2.csv \
     --out_csv /home/iscb/wolfson/annab4/outputs/interesting_isoforms_thr58.csv \
-    --thr 58
+    --thr 58 \
+    --pdb_dir /home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms

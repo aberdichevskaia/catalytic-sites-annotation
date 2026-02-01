@@ -64,21 +64,22 @@ from typing import Dict, List, Tuple, Optional, Any
 import numpy as np
 import pandas as pd
 
+from isoform_pipeline_utils import (
+    catalytic_channel,
+    collect_structure_paths,
+    ensure_trailing_slash,
+    esm_exists_for_origin,
+)
+
 # ---------------- ScanNet_Ub in sys.path ----------------
-PROJECT_ROOT = "/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub/"
-if PROJECT_ROOT not in sys.path:
+PROJECT_ROOT = os.environ.get("SCANNET_PROJECT_ROOT")
+if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import predict_bindingsites  # noqa: E402
 
 # ---------------- helpers -------------------------
 UNIPROT_RE = re.compile(r"[A-Z0-9]{6,10}", re.I)
-
-
-def ensure_trailing_slash(p: Optional[str]) -> Optional[str]:
-    if not p:
-        return p
-    return p if p.endswith(os.sep) else p + os.sep
 
 
 def entry_from_path(path: str) -> str:
@@ -102,16 +103,6 @@ def entry_from_path(path: str) -> str:
     return stem.upper()
 
 
-def af_stem(path: str) -> str:
-    """
-    Return AF-stem (or generic stem) for passing to predict_bindingsites
-    and for MSA/ESM2 lookup:
-      '/.../AF-P81877-F1-model_v6.cif' -> 'AF-P81877-F1-model_v6'
-      '/.../A0A0K2S4Q6-1.pdb'          -> 'A0A0K2S4Q6-1'
-    """
-    return os.path.splitext(os.path.basename(path))[0]
-
-
 def acc_only(name: str) -> str:
     """
     Extract base ACC-like id from display name.
@@ -124,7 +115,7 @@ def acc_only(name: str) -> str:
 
 
 # ---- Check if MSA exists for given AF/generic stem ----
-def msa_exists_for_stem(msa_root: str, stem: str) -> bool:
+def msa_exists_for_stem(msa_root: Optional[str], stem: str) -> bool:
     """
     Check if there is at least one file like:
       MSA_<stem>_0_A.fasta / MSA_<stem>_0_B.fasta / ...
@@ -133,27 +124,6 @@ def msa_exists_for_stem(msa_root: str, stem: str) -> bool:
         return False
     pattern = os.path.join(msa_root, f"MSA_{stem}_*_*.fasta")
     return bool(glob(pattern))
-
-
-# ---- ESM2 cache path & existence check ----
-def esm_cache_path(out_dir: str, origin: str) -> str:
-    sub = origin[:2] if len(origin) >= 2 else "__"
-    return os.path.join(out_dir, sub, f"{origin}.npy")
-
-
-def esm_exists_for_origin(esm2_root: str, origin: str) -> bool:
-    """
-    Check cached ESM2 embedding:
-      <esm2_root>/<origin[:2]>/<origin>.npy
-    Try both exact and lowercased origin (filesystem variability).
-    """
-    if not esm2_root:
-        return False
-    p1 = esm_cache_path(esm2_root, origin)
-    if os.path.exists(p1):
-        return True
-    p2 = esm_cache_path(esm2_root, origin.lower())
-    return os.path.exists(p2)
 
 
 def _make_esm2_pipeline(esm2_dir: str):
@@ -378,15 +348,6 @@ def run_cv_catalytic_inference(
     return dict(zip(entry_names, preds)), dict(zip(entry_names, resids))
 
 
-def catalytic_channel(arr: np.ndarray) -> np.ndarray:
-    """Extract catalytic probability channel from model output."""
-    if arr.ndim == 1:
-        return arr.astype(float)
-    if arr.ndim == 2:
-        return (arr[:, 0] if arr.shape[1] == 1 else arr[:, 1]).astype(float)
-    return np.asarray(arr).reshape(-1).astype(float)
-
-
 def hits_to_str(probs: np.ndarray, resids: Optional[np.ndarray], thr: float) -> str:
     """Convert predictions above threshold into comma-separated list of residue positions."""
     if resids is None or len(resids) != len(probs):
@@ -405,9 +366,9 @@ def main():
             "(cv_catalytic, one meta JSON)."
         )
     )
-    ap.add_argument("--structures_dir", default="/home/iscb/wolfson/jeromet/AFDB/Human_v2")
-    ap.add_argument("--msa_dir", default="/home/iscb/wolfson/jeromet/Data/MSA_v2")
-    ap.add_argument("--meta_json", required=True, help="Unified JSON with names/genes/EC/catalytic sites")
+    ap.add_argument("--structures_dir", required=True, help="Directory with *.cif or *.pdb structures.")
+    ap.add_argument("--msa_dir", default=None, help="Directory with MSA files (MSA_<stem>_*_*.fasta).")
+    ap.add_argument("--meta_json", required=True, help="Unified JSON with names/genes/EC/catalytic sites.")
 
     ap.add_argument("--use_msa", action="store_true")
     ap.add_argument("--use_esm2", action="store_true", help="Use ESM2 cached embeddings when present; fallback to noMSA")
@@ -429,19 +390,10 @@ def main():
 
     # 1) Collect structures.
     print(f"[STEP] scanning structures under {structures_dir}", flush=True)
-    cif_paths = glob(os.path.join(structures_dir, "*.cif"))
-    pdb_paths = glob(os.path.join(structures_dir, "*.pdb"))
-    by_runname: Dict[str, str] = {}     # stem -> path
-    display_for: Dict[str, str] = {}    # stem -> display id
-
-    for p in cif_paths + pdb_paths:
-        rn = af_stem(p)            # 'AF-P81877-F1-model_v6' or 'A0A0K2S4Q6-1'
-        disp = entry_from_path(p)  # 'P81877_F1' or 'A0A0K2S4Q6-1'
-        prev = by_runname.get(rn)
-        # Prefer .pdb when both exist
-        if prev is None or (prev.lower().endswith(".cif") and p.lower().endswith(".pdb")):
-            by_runname[rn] = p
-            display_for[rn] = disp
+    by_runname = collect_structure_paths(structures_dir)
+    display_for: Dict[str, str] = {}
+    for rn, p in by_runname.items():
+        display_for[rn] = entry_from_path(p)
 
     entries_all = sorted(by_runname.keys())
     if not entries_all:

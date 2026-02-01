@@ -23,7 +23,7 @@ Usage example:
       --in_csv isoforms_cv_catalytic_thr65_var.csv \
       --out_csv isoforms_cv_catalytic_thr65_loss.csv \
       --thr 65 \
-      --pdb_dir /home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms
+      --pdb_dir /path/to/isoform_pdbs
 """
 
 import os
@@ -57,12 +57,12 @@ GAP_PEN = (-100, -10)
 
 def parse_predicted_positions(cell) -> set[int]:
     """
-    Парсим предсказания вида:
+    Parse predictions of the form:
       "['0', 'A', '306']"
       "['0', 'A', '186'],['0', 'A', '244']"
-    Берём только последние числа из троек (306, 186, 244, ...).
+    We keep only the last number from each triplet (306, 186, 244, ...).
 
-    Возвращаем множество позиций (int).
+    Returns a set of positions (int).
     """
     if cell is None:
         return set()
@@ -71,8 +71,8 @@ def parse_predicted_positions(cell) -> set[int]:
     if not s or s.lower() in {"nan", "none"}:
         return set()
 
-    # Попробуем распарсить как список троек через ast.literal_eval
-    #  - "['0','A','306']"           -> [['0','A','306']]
+    # Try parsing as a list of triplets using ast.literal_eval:
+    #  - "['0','A','306']"                 -> [['0','A','306']]
     #  - "['0','A','186'],['0','A','244']" -> [['0','A','186'], ['0','A','244']]
     try:
         text = s
@@ -80,7 +80,7 @@ def parse_predicted_positions(cell) -> set[int]:
             text = "[" + text + "]"
         v = ast.literal_eval(text)
     except Exception:
-        # Фоллбек: если вдруг формат изменится, выдёрнем все числа через regex
+        # Fallback: if the format changes, extract all positive numbers via regex.
         nums = {int(m.group(0)) for m in re.finditer(r"\d+", s) if int(m.group(0)) > 0}
         return nums
 
@@ -88,7 +88,7 @@ def parse_predicted_positions(cell) -> set[int]:
 
     if isinstance(v, list):
         for elem in v:
-            # ожидаем список/кортеж вида ['0','A','306']
+            # Expect a list/tuple like ['0','A','306'].
             if isinstance(elem, (list, tuple)) and len(elem) >= 3:
                 try:
                     pos = int(elem[2])
@@ -97,14 +97,14 @@ def parse_predicted_positions(cell) -> set[int]:
                 except Exception:
                     pass
             else:
-                # на всякий случай: если не тройка, попробуем вытащить все числа
+                # If not a triplet, attempt to extract numbers defensively.
                 try:
-                    # вдруг elem уже число/строка с числом
+                    # If elem is already a number or a numeric string.
                     pos = int(elem)
                     if pos > 0:
                         positions.add(pos)
                 except Exception:
-                    # или строка типа "['0','A','306']" — вытащим все числа regex'ом
+                    # If it's a nested string like "['0','A','306']", extract numbers.
                     elem_s = str(elem)
                     for m in re.finditer(r"\d+", elem_s):
                         val = int(m.group(0))
@@ -310,8 +310,8 @@ def main():
     )
     parser.add_argument(
         "--pdb_dir",
-        default="/home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms",
-        help="Directory with isoform PDB files (default: %(default)s)",
+        required=True,
+        help="Directory with isoform PDB files.",
     )
     parser.add_argument(
         "--id_col",
