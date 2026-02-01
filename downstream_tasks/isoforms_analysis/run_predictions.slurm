@@ -14,6 +14,7 @@
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 export KERAS_BACKEND=jax
 conda activate scannet_keras3
+export SCANNET_PROJECT_ROOT=/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub
 
 PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/predict.py \
   --structures_dir /home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms \
