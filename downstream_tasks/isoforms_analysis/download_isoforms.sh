@@ -1,0 +1,1 @@
+python /home/iscb/wolfson/annab4/catalytic-sites-annotation/isoforms/download_isoforms.py --from-uniprot-json /home/iscb/wolfson/annab4/DB/all_proteins/human_all.json.gz --quiet --pdb-dir /home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms --meta-out /home/iscb/wolfson/annab4/DB/all_proteins/isoform_meta.json

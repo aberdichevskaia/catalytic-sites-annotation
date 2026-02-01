@@ -1,0 +1,2 @@
+cp /home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/weight_based_v9/esm2_150M_layer30/D3/D3Z6P0_A.npy \
+ /home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/weight_based_v9/esm2_150M_layer30/D3/D3Z6P0.npy 
