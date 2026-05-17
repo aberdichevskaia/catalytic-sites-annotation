@@ -8,9 +8,9 @@ import argparse
 from glob import glob
 from typing import List, Tuple
 
-# Подключаем ScanNet_Ub
-SCANNET_ROOT = "/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub"
-if SCANNET_ROOT not in sys.path:
+# Set SCANNET_ROOT env var to the ScanNet_Ub repository root (see config.example.yaml).
+SCANNET_ROOT = os.environ.get("SCANNET_ROOT", "")
+if SCANNET_ROOT and SCANNET_ROOT not in sys.path:
     sys.path.insert(0, SCANNET_ROOT)
 
 from preprocessing import PDBio, PDB_processing, sequence_utils

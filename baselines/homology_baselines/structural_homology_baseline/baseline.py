@@ -24,9 +24,9 @@ from utils.alignment import compute_index_mapping
 
 
 # -------------------- Hardcoded paths & params --------------------
-SPLITS_JSON = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology/3Di_DB_splits.json"
+SPLITS_JSON = ""
 
-OUTPUT_DIR_BASE = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology_baseline/results_adaptive_cutoff"
+OUTPUT_DIR_BASE = ""
 
 # Scoring/propagation knobs:
 DENOMS = [2]            # adaptive thresholds: max_score/denom (>= hybrid threshold)
@@ -541,6 +541,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cv_fold", type=int, required=True,
                         help="CV fold index in [1..5]")
+    parser.add_argument("--splits_json", type=str, required=True,
+                        help="Path to splits JSON (see config.example.yaml: splits_json)")
+    parser.add_argument("--out_base", type=str, required=True,
+                        help="Output directory base (see config.example.yaml: structural_baseline_output)")
     parser.add_argument("--check", action='store_true')
     parser.add_argument("--template_weight_exp", type=float, default=TEMPLATE_WEIGHT_EXP,
                         help="Exponent for template structure weight reweighting")
@@ -568,7 +572,7 @@ def main():
     print(f"[CFG] TEMPLATE_WEIGHT_EXP={TEMPLATE_WEIGHT_EXP}")
 
     # Load split JSON
-    all_data = load_splits(SPLITS_JSON)
+    all_data = load_splits(args.splits_json)
 
     # Collect template DB and targets
     templates = collect_from_splits(all_data, train_splits)
@@ -591,7 +595,7 @@ def main():
 
     # Save results per denom and subset
     for d in DENOMS:
-        out_dir = f"{OUTPUT_DIR_BASE}_den{d}_cv{cv_fold}"
+        out_dir = f"{args.out_base}_den{d}_cv{cv_fold}"
         model_name = (f"3Di-homology-baseline (cutoff={CUTOFF}, denom={d}, pct={PCTL}, "
                       f"minlen={MIN_ALIGN_LEN}, cv={cv_fold}, tw_exp={TEMPLATE_WEIGHT_EXP})")
 

@@ -31,8 +31,8 @@ from utils.alignment import compute_index_mapping
 
 
 # --------------------- Config (can be overridden by CLI) ---------------------
-SPLITS_JSON = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology/3Di_DB_splits.json"
-OUTPUT_DIR_BASE = "/home/iscb/wolfson/annab4/DB/all_proteins/sequence_homology_baseline/results_adaptive_cutoff"
+SPLITS_JSON = ""
+OUTPUT_DIR_BASE = ""
 
 DENOM = 2                # threshold = min(max_score/DENOM, pctl_score)
 PCTL = 95.0              # hybrid threshold percentile of raw best scores
@@ -259,8 +259,10 @@ def main():
     parser = argparse.ArgumentParser()
     global CUTOFF, DENOM, MIN_ALIGN_LEN, TOPK_HITS, TEMPLATE_WEIGHT_EXP, THREADS
     parser.add_argument("--cv_fold", type=int, required=True, help="fold in [1..5]")
-    parser.add_argument("--splits_json", type=str, default=SPLITS_JSON)
-    parser.add_argument("--out_base", type=str, default=OUTPUT_DIR_BASE)
+    parser.add_argument("--splits_json", type=str, required=True,
+                        help="Path to splits JSON (see config.example.yaml: splits_json)")
+    parser.add_argument("--out_base", type=str, required=True,
+                        help="Output directory base (see config.example.yaml: sequence_baseline_output)")
     parser.add_argument("--cutoff", type=float, default=CUTOFF)
     parser.add_argument("--denom", type=float, default=DENOM)
     parser.add_argument("--min_align_len", type=int, default=MIN_ALIGN_LEN)

@@ -12,14 +12,30 @@ from copy import deepcopy
 from utils.ec_numbers import valid_ec_number
 from utils.data_loading import parse_batch_file
 
-# Paths to files
-cluster_level_1_path = "/home/iscb/wolfson/annab4/DB/clustering/cluster_level_1_cluster.tsv"
-cluster_level_2_path = "/home/iscb/wolfson/annab4/DB/clustering/cluster_level_2_cluster.tsv"
-protein_table_path = "/home/iscb/wolfson/annab4/DB/all_protein_table_modified.json"
+import argparse as _argparse
+_ap = _argparse.ArgumentParser(
+    description="Graph-based train/val/test split by EC number and sequence clustering."
+)
+_ap.add_argument("--cluster_level_1", required=True,
+                 help="Path to cluster_level_1_cluster.tsv (see config.example.yaml)")
+_ap.add_argument("--cluster_level_2", required=True,
+                 help="Path to cluster_level_2_cluster.tsv (see config.example.yaml)")
+_ap.add_argument("--protein_table", required=True,
+                 help="EC-filtered protein table JSON (see config.example.yaml: protein_table_modified)")
+_ap.add_argument("--batches_dir", required=True,
+                 help="Directory with batch*_annotations.pkl (see config.example.yaml: batches_dir)")
+_ap.add_argument("--output_dir", required=True,
+                 help="Directory for split output files (see config.example.yaml: splits_dir)")
+_ap.add_argument("--output_csv", required=True,
+                 help="Path for output dataset CSV (see config.example.yaml)")
+_args = _ap.parse_args()
 
-pkl_folder_path = "/home/iscb/wolfson/annab4/DB/all_proteins/batches/"
-output_dir = "/home/iscb/wolfson/annab4/DB/all_proteins/splitted5"
-final_dataset_path = "/home/iscb/wolfson/annab4/DB/all_proteins/dataset_tables5.csv"
+cluster_level_1_path = _args.cluster_level_1
+cluster_level_2_path = _args.cluster_level_2
+protein_table_path   = _args.protein_table
+pkl_folder_path      = _args.batches_dir
+output_dir           = _args.output_dir
+final_dataset_path   = _args.output_csv
 
 # Load clustering and protein data
 cluster_level_1 = pd.read_csv(cluster_level_1_path, sep='\t', header=None, names=['Cluster_1', 'Sequence_ID'])
@@ -224,7 +240,7 @@ chains = []
 
 # Process each batch file and assign based on the new Set_Type
 for i in range(1, 101):
-    batch_file = f'/home/iscb/wolfson/annab4/DB/all_proteins/batches/batch{i}_annotations.pkl'
+    batch_file = os.path.join(pkl_folder_path, f'batch{i}_annotations.pkl')
     if os.path.isfile(batch_file):
         batch_data = parse_batch_file(batch_file)
         chains = chains + list(batch_data.keys())

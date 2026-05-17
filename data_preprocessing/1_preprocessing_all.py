@@ -4,6 +4,7 @@
 #TODO: добавить проверку, что не добавляются "пустые" последовательности, без положительных лейблов
 #TODO: как-то разобраться с pdb, которые относятся к нескольким uniprot. или сразу их удалять, или указывать, какие именно цепи имеются ввиду
 
+import argparse
 import json
 import os
 import pickle
@@ -18,10 +19,11 @@ from scipy.spatial import cKDTree
 import warnings
 warnings.filterwarnings("ignore")
 
-# Создаём объект для работы с PDB
 pdbl = PDBList()
 parser = MMCIFParser()
 ppb = PPBuilder()
+
+PDB_DIR = ""  # set from --pdb_dir in main()
 
 # ---------------------- Функции для извлечения информации ----------------------
 def extract_ec_number(protein_description):
@@ -86,7 +88,7 @@ def get_chains_sequences(structure, chain_ids):
 
 def parse_biological_assembly(pdb_id):
     try:
-        cif_filename = pdbl.retrieve_pdb_file(pdb_id, file_format='mmCif', pdir='/home/iscb/wolfson/annab4/Data/PDB_files')
+        cif_filename = pdbl.retrieve_pdb_file(pdb_id, file_format='mmCif', pdir=PDB_DIR)
         structure = parser.get_structure(pdb_id, cif_filename)
         return structure
     except Exception as e:
@@ -328,32 +330,42 @@ def process_batch(data_batch, batch_num, output_dir):
     except Exception as e:
         print(f"[ERROR] Ошибка при сохранении файлов для батча {batch_num}: {e}")
 
-# ---------------------- Основной блок ----------------------
+# ---------------------- Entry point ----------------------
 def main():
-    input_file = "/home/iscb/wolfson/annab4/uniprot_files/filtered_all_protein.json"
+    global PDB_DIR
+
+    ap = argparse.ArgumentParser(description="Preprocess UniProt JSON into per-batch annotation pickles.")
+    ap.add_argument("--input_file", required=True,
+                    help="UniProt JSON export (see config.example.yaml: uniprot_file)")
+    ap.add_argument("--output_dir", required=True,
+                    help="Directory to write batch pickles (see config.example.yaml: batches_dir)")
+    ap.add_argument("--pdb_dir", required=True,
+                    help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
+    ap.add_argument("--num_batches", type=int, default=100)
+    args = ap.parse_args()
+
+    PDB_DIR = args.pdb_dir
+
     try:
-        with open(input_file) as f:
+        with open(args.input_file) as f:
             results = json.load(f)
     except Exception as e:
-        print(f"[FATAL] Не удалось открыть входной файл {input_file}: {e}")
-        return
+        raise SystemExit(f"[FATAL] Cannot open input file {args.input_file}: {e}")
 
     total = len(results)
-    num_batches = 100
-    batch_size = (total + num_batches - 1) // num_batches  # округление вверх
+    batch_size = (total + args.num_batches - 1) // args.num_batches
 
-    print(f"[INFO] Всего белков: {total}. Будет обработано {num_batches} батчей, по ~{batch_size} белков в каждом.")
-    
-    output_dir = os.path.join("/home/iscb/wolfson/annab4/DB/all_proteins", "batches")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for i in range(0, num_batches):
+    print(f"[INFO] Total proteins: {total}. Processing {args.num_batches} batches of ~{batch_size} each.")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    for i in range(args.num_batches):
         batch_start = i * batch_size
         batch_end = min((i + 1) * batch_size, total)
         data_batch = results[batch_start:batch_end]
-        print(f"[INFO] Обработка батча {i+1}: белки с {batch_start} до {batch_end}")
-        process_batch(data_batch, i + 1, output_dir)
-        print(f"[INFO] Завершён батч {i+1}\n")
+        print(f"[INFO] Processing batch {i+1}: proteins {batch_start}–{batch_end}")
+        process_batch(data_batch, i + 1, args.output_dir)
+        print(f"[INFO] Batch {i+1} done.\n")
 
 if __name__ == "__main__":
     main()

@@ -20,12 +20,30 @@ from glob import glob
 from utils.ec_numbers import valid_ec_number
 from utils.data_loading import parse_batch_file
 
+import argparse as _argparse
+_ap = _argparse.ArgumentParser(
+    description="Build 5-fold stratified CV splits balanced by chemical class."
+)
+_ap.add_argument("--cluster_level_1", required=True,
+                 help="Path to cluster_level_1_cluster.tsv (see config.example.yaml)")
+_ap.add_argument("--cluster_level_2", required=True,
+                 help="Path to cluster_level_2_cluster.tsv (see config.example.yaml)")
+_ap.add_argument("--protein_table", required=True,
+                 help="EC-filtered protein table JSON (see config.example.yaml: protein_table_modified)")
+_ap.add_argument("--batches_dir", required=True,
+                 help="Directory with batch*_annotations.pkl (see config.example.yaml: batches_dir)")
+_ap.add_argument("--pdb_dir", required=True,
+                 help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
+_ap.add_argument("--output_dir", required=True,
+                 help="Output directory for CV splits (see config.example.yaml: cv_dir)")
+_args = _ap.parse_args()
+
 random.seed(42)
 np.random.seed(42)
 
 n_procs = min(128, cpu_count())
 
-PDB_DIR = "/home/iscb/wolfson/annab4/Data/PDB_files"
+PDB_DIR        = _args.pdb_dir
 
 
 
@@ -92,13 +110,12 @@ def _process_seq(args):
     return cl1, uid, cnt, valid_pdbs
 
 
-cluster_level_1_path = "/home/iscb/wolfson/annab4/DB/clustering/cluster_level_1_cluster.tsv"
-cluster_level_2_path = "/home/iscb/wolfson/annab4/DB/clustering/cluster_level_2_cluster.tsv"
-protein_table_path  = "/home/iscb/wolfson/annab4/DB/all_protein_table_modified.json"
-
-pkl_folder_path = "/home/iscb/wolfson/annab4/DB/all_proteins/batches/"
-output_dir = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/weight_based_v99"
-final_dataset_path = os.path.join(output_dir, "dataset.csv")
+cluster_level_1_path = _args.cluster_level_1
+cluster_level_2_path = _args.cluster_level_2
+protein_table_path   = _args.protein_table
+pkl_folder_path      = _args.batches_dir
+output_dir           = _args.output_dir
+final_dataset_path   = os.path.join(output_dir, "dataset.csv")
 
 os.makedirs(output_dir, exist_ok=True)
 
@@ -145,8 +162,6 @@ for item in results:
         cluster_1_to_seqs[cl1].append(pdb)
         pdb_to_uniprot[pdb] = uid
 
-# with open("/home/iscb/wolfson/annab4/DB/all_proteins/pdb_to_uniprot.json", "w") as file: #TODO: вставить это в какое-то более уместное место. и обратный словарь тоже
-#     json.dump(pdb_to_uniprot, file)
 
     
 # 4) Убираем дубликаты

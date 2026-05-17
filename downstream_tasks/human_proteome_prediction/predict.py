@@ -52,8 +52,9 @@ import numpy as np
 import pandas as pd
 
 # ---------------- ScanNet_Ub in sys.path ----------------
-PROJECT_ROOT = "/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub/"
-if PROJECT_ROOT not in sys.path:
+# Set SCANNET_ROOT env var to the ScanNet_Ub repository root (see config.example.yaml).
+PROJECT_ROOT = os.environ.get("SCANNET_ROOT", "")
+if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import predict_bindingsites  # noqa: E402
@@ -274,8 +275,10 @@ def main():
     print("[BOOT] starting predict.py", flush=True)
 
     ap = argparse.ArgumentParser(description="Catalytic-site inference over AF Human (cv_catalytic, one meta JSON).")
-    ap.add_argument("--structures_dir", default="/home/iscb/wolfson/jeromet/AFDB/Human_v2")
-    ap.add_argument("--msa_dir", default="/home/iscb/wolfson/jeromet/Data/MSA_v2")
+    ap.add_argument("--structures_dir", required=True,
+                    help="Directory with AlphaFold .cif/.pdb files (see config.example.yaml: alphafold_human_dir)")
+    ap.add_argument("--msa_dir", default=None,
+                    help="Directory with pre-computed MSAs (see config.example.yaml: msa_dir)")
     ap.add_argument("--meta_json", required=True, help="Unified JSON with names/genes/EC/catalytic sites")
 
     ap.add_argument("--use_msa", action="store_true", help="Use MSA when present (strict: do NOT build missing MSAs)")

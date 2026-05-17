@@ -1,0 +1,77 @@
+# config.example.yaml
+# Copy this file to config.yaml and fill in your paths.
+# config.yaml is gitignored — never commit it.
+#
+# This file documents all path arguments expected by the pipeline scripts.
+# Each entry shows: path key, which script uses it, and the corresponding CLI argument.
+
+# ── Raw input ────────────────────────────────────────────────────────────────
+
+# UniProt JSON export (input to step 1)
+uniprot_file: /path/to/filtered_all_protein.json       # 1_preprocessing_all.py --input_file
+
+# Directory where PDB/AlphaFold .cif files are downloaded and cached
+pdb_dir: /path/to/PDB_files                            # 1_preprocessing_all.py --pdb_dir
+                                                        # split.py              --pdb_dir
+
+# ── Clustering files (produced by MMseqs2 or similar) ────────────────────────
+
+cluster_level_1: /path/to/clustering/cluster_level_1_cluster.tsv
+cluster_level_2: /path/to/clustering/cluster_level_2_cluster.tsv
+# Used by: 3_ec_numbers_quick_fix.py, 4_split_by_ec_number.py, split.py
+#   CLI:   --cluster_level_1 / --cluster_level_2
+
+# ── Database outputs (produced by preprocessing steps 1–3) ───────────────────
+
+# Directory containing batch*_annotations.pkl and batch*_table.json
+batches_dir: /path/to/DB/batches                       # 1_preprocessing_all.py --output_dir
+                                                        # 2_join_data.py         --batches_dir
+                                                        # 4_split_by_ec_number.py --batches_dir
+                                                        # split.py               --batches_dir
+
+# Aggregated protein metadata table (output of step 2)
+protein_table: /path/to/DB/all_protein_table.json      # 2_join_data.py --output_table
+                                                        # 3_ec_numbers_quick_fix.py --protein_table
+
+# EC-number-filtered table (output of step 3)
+protein_table_modified: /path/to/DB/all_protein_table_modified.json
+                                                        # 3_ec_numbers_quick_fix.py --output_table
+                                                        # 4_split_by_ec_number.py  --protein_table
+                                                        # split.py                 --protein_table
+
+# FASTA of all UniProt sequences (output of step 2)
+protein_fasta: /path/to/DB/all_protein_sequences.fasta # 2_join_data.py --output_fasta
+
+# ── Split outputs ─────────────────────────────────────────────────────────────
+
+# Train/val/test split directory (output of 4_split_by_ec_number.py)
+splits_dir: /path/to/DB/splitted                       # 4_split_by_ec_number.py --output_dir
+
+# 5-fold cross-validation directory (output of split.py)
+cv_dir: /path/to/DB/cross_validation                  # split.py --output_dir
+
+# ── Baselines ─────────────────────────────────────────────────────────────────
+
+# JSON with per-split sequence/structure data (input to both baseline scripts)
+splits_json: /path/to/DB/structural_homology/3Di_DB_splits.json
+                                                        # sequence_homology_baseline/baseline.py --splits_json
+                                                        # structural_homology_baseline/baseline.py --splits_json
+
+sequence_baseline_output: /path/to/sequence_homology_baseline/results
+                                                        # sequence_homology_baseline/baseline.py --out_base
+
+structural_baseline_output: /path/to/structural_homology_baseline/results
+                                                        # structural_homology_baseline/baseline.py --out_base
+
+# ── Human proteome screening ──────────────────────────────────────────────────
+
+# AlphaFold Human proteome .cif files
+alphafold_human_dir: /path/to/AFDB/Human_v2            # predict.py --structures_dir
+
+# Pre-computed MSAs for AF structures
+msa_dir: /path/to/MSA_data                             # predict.py --msa_dir
+
+# ── External model ────────────────────────────────────────────────────────────
+
+# Root of the ScanNet repository (set as env var: export SCANNET_ROOT=...)
+scannet_root: /path/to/ScanNet_Ub                      # predict.py: SCANNET_ROOT env var
