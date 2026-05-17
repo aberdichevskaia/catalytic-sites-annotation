@@ -40,6 +40,34 @@ import matplotlib
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
 
+from matplotlib.ticker import MultipleLocator
+
+matplotlib.rcParams.update({
+    "font.size": 7,
+    "axes.labelsize": 7,
+    "xtick.labelsize": 6,
+    "ytick.labelsize": 6,
+    "legend.fontsize": 6,
+    "axes.titlesize": 7,
+
+    "axes.linewidth": 0.7,
+    "grid.linewidth": 0.5,
+    "lines.linewidth": 0.9,
+
+    "svg.fonttype": "path" #"none",  
+})
+
+
+# figures sizes (for the paper)
+W_FULL = 6.27
+GUTTER = 0.15
+W_HALF = (W_FULL - GUTTER) / 2
+W_THIRD = (W_FULL - GUTTER) / 3
+W_TWO_THIRDS = 2 * (W_FULL - GUTTER) / 3
+
+H_SMALL = 1.9
+H_WIDE = 2.7
+
 from sklearn.metrics import precision_recall_curve, auc, average_precision_score
 
 
@@ -192,11 +220,18 @@ def best_f1_threshold_weighted(labels, preds, weights):
     if thr.size == 0:
         return {"tau": float("nan"), "precision": float(prec[-1]), "recall": float(rec[-1]), "f1": 0.0}
 
-    prec2 = prec[1:]
-    rec2  = rec[1:]
-    f1 = 2.0 * prec2 * rec2 / np.maximum(prec2 + rec2, 1e-12)
+    prec_t = prec[:-1]
+    rec_t  = rec[:-1]
+
+    f1 = 2.0 * prec_t * rec_t / np.maximum(prec_t + rec_t, 1e-12)
     j = int(np.argmax(f1))
-    return {"tau": float(thr[j]), "precision": float(prec2[j]), "recall": float(rec2[j]), "f1": float(f1[j])}
+
+    return {
+        "tau": float(thr[j]),
+        "precision": float(prec_t[j]),
+        "recall": float(rec_t[j]),
+        "f1": float(f1[j]),
+    }
 
 def topk_metrics_curves(labels, preds, weights, max_k=10):
     """
@@ -515,51 +550,75 @@ def save_mp_whisker(mp_arr: np.ndarray,
 def save_pr_overlays(curves: List[Tuple[np.ndarray, np.ndarray, float]],
                      out_path: str,
                      title: str,
-                     overlay_alpha: float = 0.25,
-                     grid: float = 0.1,
-                     margin: float = 0.05,
+                     overlay_alpha: float = 0.20,
+                     grid: float = 0.2,          # IMPORTANT: coarser ticks for small figures
+                     margin: float = 0.00,
                      n_grid: int = 501) -> Dict[str, Any]:
     """
-    Draw each PR curve with transparency + mean PR curve on a fixed recall grid.
+    Draw PR overlays + mean PR curve on a fixed recall grid.
     Returns summary dict.
     """
     recall_grid = np.linspace(0.0, 1.0, n_grid)
     P = []
-
-    fig, ax = plt.subplots(figsize=(7.5, 7.5))
     aucs = []
 
-    for rc, pr, aucpr in curves:
-        rc = np.asarray(rc, float)
-        pr = np.asarray(pr, float)
+    # Local styling for a small plot
+    with plt.rc_context({
+        "font.size": 7,
+        "axes.labelsize": 7,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
+        "legend.fontsize": 6,
+        "axes.linewidth": 0.8,
+    }):
+        fig, ax = plt.subplots(figsize=(W_THIRD, H_SMALL), constrained_layout=True)
 
-        # Ensure increasing recall for interpolation
-        order = np.argsort(rc)
-        rc = rc[order]
-        pr = pr[order]
+        for rc, pr, aucpr in curves:
+            rc = np.asarray(rc, float)
+            pr = np.asarray(pr, float)
 
-        # Interpolate precision on recall_grid
-        pr_i = np.interp(recall_grid, rc, pr, left=pr[0], right=pr[-1])
-        P.append(pr_i)
-        aucs.append(float(aucpr))
+            order = np.argsort(rc)
+            rc = rc[order]
+            pr = pr[order]
 
-        ax.plot(rc, pr, linewidth=1.2, alpha=overlay_alpha)
+            pr_i = np.interp(recall_grid, rc, pr, left=pr[0], right=pr[-1])
+            P.append(pr_i)
+            aucs.append(float(aucpr))
 
-    P = np.stack(P, axis=0)  # (V, n_grid)
-    pr_mean = P.mean(axis=0)
-    auc_mean_curve = float(auc(recall_grid, pr_mean))
+            ax.plot(rc, pr, linewidth=0.9, alpha=overlay_alpha)
 
-    ax.plot(recall_grid, pr_mean, linewidth=2.5,
-            label=f"Mean curve AUCPR={auc_mean_curve:.3f} | mean(AUCPR)={np.mean(aucs):.3f}")
+        P = np.stack(P, axis=0)
+        pr_mean = P.mean(axis=0)
+        auc_mean_curve = float(auc(recall_grid, pr_mean))
 
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-    ax.set_title(title)
-    apply_fixed_axes_pr(ax, grid=grid, margin=margin)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+        ax.plot(recall_grid, pr_mean, linewidth=1.3)
+
+        ax.set_xlabel("Recall", labelpad=1)
+        ax.set_ylabel("Precision", labelpad=1)
+
+        # Clean, readable ticks for small figure
+        ax.set_xlim(0.0 - margin, 1.0 + margin)
+        ax.set_ylim(0.0 - margin, 1.0 + margin)
+        ax.xaxis.set_major_locator(MultipleLocator(grid))
+        ax.yaxis.set_major_locator(MultipleLocator(grid))
+        ax.tick_params(length=3, width=0.8, pad=1)
+
+        # Instead of a huge legend: compact text box inside axes
+        txt = (f"AUCPR(mean curve) = {auc_mean_curve:.3f}\n"
+               f"mean(AUCPR) = {np.mean(aucs):.3f}")
+        ax.text(0.02, 0.02, txt,
+                transform=ax.transAxes,
+                fontsize=6,
+                ha="left", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.7, edgecolor="none"))
+
+        # If you REALLY need a legend, keep it short & small:
+        # ax.legend([f"Mean AUCPR={auc_mean_curve:.3f}"], loc="lower left", frameon=False,
+        #           handlelength=1.2, borderaxespad=0.2)
+
+        # Prefer vector for reports
+        fig.savefig(out_path, dpi=300)  # no bbox_inches="tight" -> keeps size stable
+        plt.close(fig)
 
     return {
         "n_versions": len(curves),
@@ -568,7 +627,6 @@ def save_pr_overlays(curves: List[Tuple[np.ndarray, np.ndarray, float]],
         "aucpr_of_mean_curve": auc_mean_curve,
         "n_grid": int(n_grid),
     }
-
 
 # =========================
 # Merge across folds
@@ -605,8 +663,11 @@ def merge_across_folds(base_dir: str,
         
         run_dir = os.path.join(base_dir, run_dir_name)
         pkl_path = os.path.join(run_dir, f"{subset}_results.pkl")
+        
         if not os.path.exists(pkl_path):
-            raise FileNotFoundError(f"Not found: {pkl_path}")
+            pkl_path = os.path.join(run_dir, f"{subset}.pkl")
+            if not os.path.exists(pkl_path): 
+                raise FileNotFoundError(f"Not found: {pkl_path}")
 
         data = load_subset_pkl(pkl_path)
 
@@ -1058,6 +1119,9 @@ def cmd_merge(args: argparse.Namespace) -> None:
 
     all_metrics = {}
 
+    best_tau = None
+    best_f1_val = None
+
     for subset in args.subsets:
         merged = merge_across_folds(
             base_dir=args.base_dir,
@@ -1080,8 +1144,27 @@ def cmd_merge(args: argparse.Namespace) -> None:
         mp_k = mp_curve(labels, preds, weights, max_k=args.max_k)
         rc, pr, aucpr = pr_curve_weighted(labels, preds, weights)
 
-        best_f1 = best_f1_threshold_weighted(labels, preds, weights)
-        prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_f1["tau"])
+        best_f1 = None
+        prf_best = None
+
+        if subset == "validation":
+            best_f1 = best_f1_threshold_weighted(labels, preds, weights)
+            best_tau = float(best_f1["tau"])
+            best_f1_val = dict(best_f1)  # на всякий, чтобы потом можно было сохранить рядом
+            prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_tau)
+
+        elif subset == "test":
+            if best_tau is None or (not np.isfinite(best_tau)):
+                raise ValueError(
+                    "Cannot evaluate test at tau-from-validation: best_tau is not set. "
+                    "Make sure 'validation' is included and processed before 'test' in --subsets."
+                )
+            prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_tau)
+
+        else:
+            if best_tau is not None and np.isfinite(best_tau):
+                prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_tau)
+
 
         # @k metrics for k=1..10 (weighted per-chain aggregation)
         prec_k10, rec_k10, hit_k10 = topk_metrics_curves(labels, preds, weights, max_k=10)
@@ -1101,8 +1184,9 @@ def cmd_merge(args: argparse.Namespace) -> None:
             "MP@1": float(mp_k[0]) if len(mp_k) >= 1 else 0.0,
             "MP@5": float(mp_k[4]) if len(mp_k) >= 5 else 0.0,
 
-            "BestF1_threshold": best_f1,          # tau + precision/recall/f1
-            "PRF_at_bestF1_tau": prf_best,        # tp/fp/fn + precision/recall/f1 at that tau
+            "BestF1_threshold": (best_f1 if subset == "validation" else None),
+            "tau_from_validation": (float(best_tau) if best_tau is not None and np.isfinite(best_tau) else None),
+            "PRF_at_tau_from_validation": (prf_best if prf_best is not None else None),
 
             "Precision@k_1to10": prec_k10.tolist(),
             "Recall@k_1to10": rec_k10.tolist(),
@@ -1181,6 +1265,8 @@ def cmd_seeds(args: argparse.Namespace) -> None:
     best_tau_for_version = {}
     
     for subset in args.subsets:
+        subset = subset.removesuffix("_results")
+
         mp_list = []
         pr_list = []
         auc_list = []
@@ -1214,12 +1300,24 @@ def cmd_seeds(args: argparse.Namespace) -> None:
 
             if subset == "validation":
                 best_f1 = best_f1_threshold_weighted(labels, preds, weights)
-                prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_f1["tau"])
-                prec_k10, rec_k10, hit_k10 = topk_metrics_curves(labels, preds, weights, max_k=10)
-                best_tau_for_version[v] = best_f1["tau"]
-            elif subset == "test":
+                best_tau_for_version[v] = float(best_f1["tau"])
                 prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_tau_for_version[v])
                 prec_k10, rec_k10, hit_k10 = topk_metrics_curves(labels, preds, weights, max_k=10)
+
+            elif subset == "test":
+                if v not in best_tau_for_version or (not np.isfinite(best_tau_for_version[v])):
+                    raise ValueError(
+                        f"Cannot evaluate test for version={v}: tau-from-validation is missing. "
+                        "Make sure 'validation' is included and processed before 'test' in --subsets."
+                    )
+                prf_best = prf_at_tau_weighted(labels, preds, weights, tau=best_tau_for_version[v])
+                prec_k10, rec_k10, hit_k10 = topk_metrics_curves(labels, preds, weights, max_k=10)
+
+            else:
+                # если ты вдруг добавишь другие subsets
+                prf_best = None
+                prec_k10, rec_k10, hit_k10 = topk_metrics_curves(labels, preds, weights, max_k=10)
+
 
             mp_list.append(mp_k)
             pr_list.append((rc, pr, aucpr))
@@ -1229,7 +1327,7 @@ def cmd_seeds(args: argparse.Namespace) -> None:
             rec_list.append(rec_k10)
             hit_list.append(hit_k10)
             f1_list.append(float(prf_best["f1"]))
-            tau_list.append(float(best_tau_for_version[v]))
+            tau_list.append(float(best_tau_for_version[v]) if v in best_tau_for_version else float("nan"))
 
             # baseline
             if use_baseline:

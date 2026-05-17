@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=precompute_esm2_human_isoforms
-#SBATCH --output=output_precompute_esm2_human_isoforms.txt  
-#SBATCH --error=error_precompute_esm2_human_isoforms.txt
+#SBATCH --job-name=precompute_esm2_human
+#SBATCH --output=output_precompute_esm2_human.txt  
+#SBATCH --error=error_precompute_esm2_human.txt
 #SBATCH --partition=killable
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1               

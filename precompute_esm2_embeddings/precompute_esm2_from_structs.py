@@ -154,7 +154,7 @@ def make_origin(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--struct_dir", required=True, help="Directory with .pdb/.cif")
-    ap.add_argument("--out_dir", required=True, help="Output directory for .npy embeddings")
+    ap.add_argument("--out_dir", required=True, help="Parent directory with directory for .npy embeddings")
     ap.add_argument("--recursive", action="store_true", help="Recurse into subfolders")
     ap.add_argument("--patterns", nargs="+", default=["*.pdb", "*.cif"], help="Glob patterns to include")
     ap.add_argument("--origin_mode", default="auto", choices=["auto", "file", "file+chain"])
@@ -171,13 +171,29 @@ def main():
     ap.add_argument("--skip_existing", action="store_true", help="Skip if output file exists")
     ap.add_argument("--manifest", default=None, help="Optional manifest TSV path")
     ap.add_argument("--qos_log_every", type=int, default=50, help="Print progress every N embeddings")
+    ap.add_argument("--esm2_version", type=str, default="esm2_t30_150M_UR50D", help="Name of version of ESM2 model (includes number of layers and parameters, like 'esm2_t30_150M_UR50D')")
+    ap.add_argument('--organism', type=str, default="Human", help="Whose proteome ids that?")
     args = ap.parse_args()
 
     if args.layer is None:
         args.layer = ESM2_DEFAULT_LAYER[args.esm2_model]
 
     os.makedirs(args.out_dir, exist_ok=True)
-    manifest_path = args.manifest or os.path.join(args.out_dir, "manifest.tsv")
+
+    if args.layer is None:
+        layer = int(args.esm2_version.split('_')[1][1:])
+    else:
+        layer = args.layer
+
+    params_cnt = int(args.esm2_version.split('_')[2][:-1])
+    out_dir = os.path.join(args.out_dir, f"{args.organism}_ESM2_{params_cnt}_layer${layer}")
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"Output dir is {out_dir}")
+    print(f"Model used is {args.esm2_version}")
+    print(f"Lasyer: {layer}")
+
+    manifest_path = args.manifest or os.path.join(out_dir, "manifest.tsv")
+
 
     # ---- collect files ----
     files = []
@@ -245,7 +261,7 @@ def main():
             items_to_process = []
             skipped = 0
             for origin, seq in items:
-                out_path = esm_cache_path(args.out_dir, origin)
+                out_path = esm_cache_path(out_dir, origin)
                 src, ch = origin_meta.get(origin, ("", ""))
                 if os.path.exists(out_path):
                     w.writerow([origin, len(seq), sha1(seq), out_path, "skipped_exists", "", src, ch])
@@ -279,15 +295,15 @@ def main():
                 toks = toks.to(args.device)
 
                 with torch.no_grad():
-                    out = esm_model(toks, repr_layers=[args.layer], return_contacts=False)
+                    out = esm_model(toks, repr_layers=[layer], return_contacts=False)
 
-                reps = out["representations"][args.layer]
+                reps = out["representations"][layer]
 
                 for i, (origin, seq) in enumerate(batch):
                     rep = reps[i, 1:len(seq) + 1].detach().cpu().numpy()
                     rep = rep.astype(save_dtype, copy=False)
 
-                    out_path = esm_cache_path(args.out_dir, origin)
+                    out_path = esm_cache_path(out_dir, origin)
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     tmp_path = out_path + ".tmp.npy"
                     np.save(tmp_path, rep)
@@ -302,7 +318,7 @@ def main():
 
             except Exception as e:
                 for origin, seq in batch:
-                    out_path = esm_cache_path(args.out_dir, origin)
+                    out_path = esm_cache_path(out_dir, origin)
                     src, ch = origin_meta.get(origin, ("", ""))
                     w.writerow([origin, len(seq), sha1(seq), out_path, "failed", repr(e), src, ch])
                 logging.error("batch %d/%d failed: %s", bidx, len(batches), e)

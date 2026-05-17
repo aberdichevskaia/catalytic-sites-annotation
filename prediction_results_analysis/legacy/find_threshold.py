@@ -68,7 +68,8 @@ def prec_recall_vs_threshold(y_true, y_probs, y_weights, thresholds):
 # ---------- Main ----------
 
 if __name__ == "__main__":
-    input_dir = "/home/iscb/wolfson/annab4/catalytic-sites-annotation/cross_validation/merged"
+    input_dir = "/home/iscb/wolfson/annab4/scannet_retrains/merged/ablate11_esm2_retrain_v3"
+    output_dir = "/home/iscb/wolfson/annab4/catalytic-sites-annotation/prediction_results_analysis/plots_ablate11_esm2"
 
     # use merged filenames, fallback to old ones if present
     train_path = find_existing(input_dir, ["train_dedup.pkl", "train_results_dedup.pkl", "train.pkl", "train_results.pkl"])
@@ -132,6 +133,6 @@ if __name__ == "__main__":
     plt.title("Precision / Recall vs Threshold (weighted)")
     plt.legend()
     plt.grid(True)
-    out_pdf = os.path.join(input_dir, "thresholds_curve_range_fixed.pdf")
-    plt.savefig(out_pdf, dpi=300, format="pdf")
-    print(f"[OK] saved plot -> {out_pdf}")
+    out_svg = os.path.join(output_dir, "thresholds_curve_range_fixed.svg")
+    plt.savefig(out_svg, dpi=300, format="svg")
+    print(f"[OK] saved plot -> {out_svg}")

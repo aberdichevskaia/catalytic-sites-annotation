@@ -95,7 +95,7 @@ def sha1(s: str) -> str:
 
 
 def esm_cache_path(out_dir: str, origin: str) -> str:
-    sub = origin[:2]
+    sub = origin[:2] if len(origin) >= 2 else "__"
     return os.path.join(out_dir, sub, f"{origin}.npy")
 
 
@@ -141,13 +141,27 @@ def main():
     ap.add_argument("--skip_existing", action="store_true", help="Skip if output file exists")
     ap.add_argument("--manifest", default=None, help="Optional manifest TSV path")
     ap.add_argument("--qos_log_every", type=int, default=50, help="Print progress every N proteins")
+    ap.add_argument("--esm2_version", type=str, default="esm2_t30_150M_UR50D", help="Name of version of ESM2 model (includes number of layers and parameters, like 'esm2_t30_150M_UR50D')")
     args = ap.parse_args()
 
     if args.layer is None:
         args.layer = ESM2_DEFAULT_LAYER[args.esm2_model]
 
     os.makedirs(args.out_dir, exist_ok=True)
-    manifest_path = args.manifest or os.path.join(args.out_dir, "manifest.tsv")
+
+    if args.layer is None:
+        layer = int(args.esm2_version.split('_')[1][1:])
+    else:
+        layer = args.layer
+
+    params_cnt = args.esm2_version.split('_')[2]  # esm2_version = "esm2_t36_3B_UR50D"
+    out_dir = os.path.join(args.out_dir, f"ESM2_{params_cnt}_layer{layer}")
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"Output dir is {out_dir}")
+    print(f"Model used is {args.esm2_version}")
+    print(f"Layer: {layer}")
+
+    manifest_path = args.manifest or os.path.join(out_dir, "manifest.tsv")
 
     # ---- read all splits using exactly the same parser as training ----
     origin_to_seq: Dict[str, str] = {}
@@ -186,39 +200,70 @@ def main():
         w = csv.writer(f, delimiter="\t")
         w.writerow(["origin", "len", "sha1", "path", "status", "error"])
 
+        if args.skip_existing:
+            items_to_process = []
+            skipped = 0
+            for origin, seq in items:
+                out_path = esm_cache_path(out_dir, origin)
+                if os.path.exists(out_path):
+                    w.writerow([origin, len(seq), sha1(seq), out_path, "skipped_exists", ""])
+                    skipped += 1
+                else:
+                    items_to_process.append((origin, seq))
+            items = items_to_process
+            print(f"Skip existing: {skipped} already cached, {total} to compute")
+
+        if not items:
+            print("Nothing to compute: all embeddings already exist.")
+            print(f"Manifest written to: {manifest_path}")
+            print("Done.")
+            return
+
+        # ---- lazy imports for torch + esm ----
+        import torch
+        import esm
+
+        if args.device == "cuda" and not torch.cuda.is_available():
+            print("[WARN] CUDA requested but not available; falling back to CPU", file=sys.stderr)
+            args.device = "cpu"
+
+        if args.esm2_version == "esm2_t30_150M_UR50D":
+            model, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+        elif args.esm2_version == "esm2_t36_3B_UR50D":
+            model, alphabet = esm.pretrained.esm2_t36_3B_UR50D()
+        elif args.esm2_version == "esm2_t48_15B_UR50D":
+            model, alphabet = esm.pretrained.esm2_t48_15B_UR50D()
+        else:
+            raise ValueError(f"Unsupported esm2_version: {args.esm2_version}")
+            
+        model.eval()
+        model = model.to(args.device)
+        batch_converter = alphabet.get_batch_converter()
+
+        save_dtype = np.float16 if args.dtype == "float16" else np.float32
+
         # batch packing
         batches = batch_by_tokens(items, max_tokens=args.max_tokens, max_batch_size=args.max_batch_size)
 
         done = 0
         for bidx, batch in enumerate(batches, 1):
-            # optionally skip entire batch items if existing
-            batch2 = []
-            for origin, seq in batch:
-                out_path = esm_cache_path(args.out_dir, origin)
-                if args.skip_existing and os.path.exists(out_path):
-                    w.writerow([origin, len(seq), sha1(seq), out_path, "skipped_exists", ""])
-                else:
-                    batch2.append((origin, seq))
-
-            if not batch2:
-                continue
 
             # ESM input format: list of (name, sequence)
-            data = [(origin, seq) for origin, seq in batch2]
+            data = [(origin, seq) for origin, seq in batch]
             try:
                 _, _, toks = batch_converter(data)
                 toks = toks.to(args.device)
 
                 with torch.no_grad():
-                    out = model(toks, repr_layers=[args.layer], return_contacts=False)
-                reps = out["representations"][args.layer]  # (B, T, 640)
+                    out = model(toks, repr_layers=[layer], return_contacts=False)
+                reps = out["representations"][layer]  # (B, T, 640)
 
                 # Save each sequence separately
-                for i, (origin, seq) in enumerate(batch2):
+                for i, (origin, seq) in enumerate(batch):
                     rep = reps[i, 1 : len(seq) + 1].detach().cpu().numpy()  # (L, 640)
                     rep = rep.astype(save_dtype, copy=False)
 
-                    out_path = esm_cache_path(args.out_dir, origin)
+                    out_path = esm_cache_path(out_dir, origin)
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
                     tmp_path = out_path + ".tmp.npy"

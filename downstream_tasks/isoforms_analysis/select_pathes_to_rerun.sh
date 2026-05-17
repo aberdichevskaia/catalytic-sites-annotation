@@ -1,4 +1,4 @@
-todo_list="/home/iscb/wolfson/annab4/catalytic-sites-annotation/isoforms/to_rerun.txt"
+todo_list="/home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/to_rerun.txt"
 pdb_dir="/home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms"
 out_dir="/home/iscb/wolfson/annab4/outputs/isoform_groups_todo"
 

@@ -1,16 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name=precompute_esm2_PPBS_16
-#SBATCH --output=output_precompute_esm2_PPBS_16.txt  
-#SBATCH --error=error_precompute_esm2_PPBS_16.txt
+#SBATCH --job-name=precompute_esm2_catalytic_150M
 #SBATCH --partition=killable
+##SBATCH --constraint="h100"
 #SBATCH --gres=gpu:1
-#SBATCH --ntasks=1               
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=500000                      
-#SBATCH --time=1440  
-#SBATCH --mail-type=ALL,TIME_LIMIT_80 
-#SBATCH --mail-user=annab4@mail.tau.ac.il                
+#SBATCH --mem=500000
+#SBATCH --time=1440
+#SBATCH --mail-type=ALL,TIME_LIMIT_80
+#SBATCH --mail-user=annab4@mail.tau.ac.il
 
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 conda activate scannet_esm2_py311

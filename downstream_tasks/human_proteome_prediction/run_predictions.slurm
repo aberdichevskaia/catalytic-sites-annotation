@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=predict_human_proteome_v2
-#SBATCH --output=output_predict_human_proteome_v2.txt  
-#SBATCH --error=error_predict_human_proteome_v2.txt
+#SBATCH --job-name=predict_human_proteome_full
+#SBATCH --output=output_predict_human_proteome_full.txt  
+#SBATCH --error=error_predict_human_proteome_full.txt
 #SBATCH --partition=killable
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1               
@@ -24,7 +24,7 @@ PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotatio
   --meta_json /home/iscb/wolfson/annab4/DB/all_proteins/human_meta.json \
   --use_esm2 --esm2_dir /home/iscb/wolfson/annab4/Data/Human_ESM2_150M_layer30 \
   --ncores ${SLURM_CPUS_PER_TASK} \
-  --out_csv /home/iscb/wolfson/annab4/outputs/human_catalytic_screen_withESM2_v2.csv
+  --out_csv /home/iscb/wolfson/annab4/outputs/human_catalytic_screen_withESM2_full.csv
 
 
 # MSA version
