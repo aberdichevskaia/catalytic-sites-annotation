@@ -17,6 +17,9 @@ from multiprocessing import Pool, cpu_count
 from prettytable import PrettyTable
 from glob import glob
 
+from utils.ec_numbers import valid_ec_number
+from utils.data_loading import parse_batch_file
+
 random.seed(42)
 np.random.seed(42)
 
@@ -24,13 +27,6 @@ n_procs = min(128, cpu_count())
 
 PDB_DIR = "/home/iscb/wolfson/annab4/Data/PDB_files"
 
-def valid_ec_number(ec_number):
-    if ec_number == "not found":
-        return False
-    parts = ec_number.split('.')
-    if len(parts) < 3:
-        return False
-    return all(part.isdigit() for part in parts[:3])
 
 
 def structure_exists(protein_id, expected_seq=None):
@@ -273,28 +269,10 @@ for comp in components:
         subsampled_components.append(sel)
 
 # parse annotations to get labels and amino acids
-def process_batch_file(fn):
-    with open(fn, 'rb') as f:
-        data = pickle.load(f)
-    out = {}
-    curr = None
-    annots = []
-    for line in data:
-        if (isinstance(line, bytes) and line.startswith(b'>')) or (isinstance(line,str) and line.startswith('>')):
-            if curr is not None:
-                out[curr] = annots.copy()
-            curr = line.lstrip(b'>').decode() if isinstance(line,bytes) else line[1:].strip()
-            annots = []
-        else:
-            annots.append(line)
-    if curr is not None:
-        out[curr] = annots.copy()
-    return out
-
 batch_files = glob(os.path.join(pkl_folder_path, "batch*_annotations.pkl"))
 
 def _parse_batch_file(fn):
-    return process_batch_file(fn)  # возвращает {chain_id: annots}
+    return parse_batch_file(fn)
 
 with Pool(n_procs) as pool:
     all_batches = pool.map(_parse_batch_file, batch_files)
@@ -683,7 +661,7 @@ split_data = [{} for _ in range(N_SPLITS)]
 for i in range(1,101):
     fn = os.path.join(pkl_folder_path, f"batch{i}_annotations.pkl")
     if not os.path.isfile(fn): continue
-    batch, chains = process_batch_file(fn), None  # повторный парсинг
+    batch = parse_batch_file(fn)
     for chain_id, ann in batch.items():
         if chain_id in no_positive_seqids:
             continue

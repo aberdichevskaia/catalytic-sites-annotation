@@ -20,6 +20,8 @@ matplotlib.use("agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_recall_curve, auc
 
+from utils.alignment import compute_index_mapping
+
 
 # -------------------- Hardcoded paths & params --------------------
 SPLITS_JSON = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology/3Di_DB_splits.json"
@@ -192,22 +194,6 @@ def collect_from_splits(all_data, split_names):
 
 
 # -------------------- Alignment & propagation --------------------
-def compute_index_mapping(aligned_filtered, aligned_original):
-    """Map indices from filtered AA seq to original AA seq using gapped strings."""
-    mapping = {}
-    i_f = 0
-    i_o = 0
-    for a, b in zip(aligned_filtered, aligned_original):
-        if a != "-" and b != "-":
-            mapping[i_f] = i_o
-            i_f += 1
-            i_o += 1
-        elif a != "-" and b == "-":
-            i_f += 1
-        elif a == "-" and b != "-":
-            i_o += 1
-    return mapping
-
 
 # Coarse AA classes for relaxed compatibility (partial credit)
 AA_CLASS = {

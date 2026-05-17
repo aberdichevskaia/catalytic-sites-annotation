@@ -27,6 +27,8 @@ matplotlib.use("agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_recall_curve, auc
 
+from utils.alignment import compute_index_mapping
+
 
 # --------------------- Config (can be overridden by CLI) ---------------------
 SPLITS_JSON = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology/3Di_DB_splits.json"
@@ -70,17 +72,6 @@ def collect_from_splits(all_data, names):
         "split_tags": split_tags,
     }
 
-def compute_index_mapping(gapped_a, gapped_b):
-    """Map indices from ungapped A to ungapped B using two gapped strings."""
-    m, i, j = {}, 0, 0
-    for a, b in zip(gapped_a, gapped_b):
-        if a != "-" and b != "-":
-            m[i] = j; i += 1; j += 1
-        elif a != "-" and b == "-":
-            i += 1
-        elif a == "-" and b != "-":
-            j += 1
-    return m
 
 def flatten_for_pr(labels, predictions, chain_weights):
     # Repeat chain weights to per-position

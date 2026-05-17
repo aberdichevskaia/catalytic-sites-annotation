@@ -9,14 +9,8 @@ import numpy as np
 from itertools import combinations
 from copy import deepcopy
 
-# Check if the EC number has three first numbers
-def valid_ec_number(ec_number):
-    if ec_number == "not found":
-        return False
-    parts = ec_number.split('.')
-    if len(parts) < 3:
-        return False
-    return all(part.isdigit() for part in parts[:3]) 
+from utils.ec_numbers import valid_ec_number
+from utils.data_loading import parse_batch_file
 
 # Paths to files
 cluster_level_1_path = "/home/iscb/wolfson/annab4/DB/clustering/cluster_level_1_cluster.tsv"
@@ -226,32 +220,14 @@ component_mapping = {node: idx + 1 for idx, component in enumerate(components) f
 # Prepare directories and datasets for train/validate/test
 train_data, val_data, test_data = {}, {}, {}
 
-def process_batch_file(batch_file):
-    with open(batch_file, 'rb') as f:
-        batch_data = pickle.load(f)
-    data = {}
-    chains = []
-    prev_id_chain = ""
-    annotations = []
-    for line in batch_data:
-        if line[0] == '>':
-            chains.append(line.lstrip(">")) 
-            if annotations:
-                data[prev_id_chain[1:]] = annotations.copy()
-            annotations = []
-            prev_id_chain = line
-        else:
-            annotations.append(line)
-    return data, chains
-
 chains = []
 
 # Process each batch file and assign based on the new Set_Type
 for i in range(1, 101):
     batch_file = f'/home/iscb/wolfson/annab4/DB/all_proteins/batches/batch{i}_annotations.pkl'
     if os.path.isfile(batch_file):
-        batch_data, file_chains = process_batch_file(batch_file)
-        chains = chains + file_chains
+        batch_data = parse_batch_file(batch_file)
+        chains = chains + list(batch_data.keys())
         for id_chain, annotations in batch_data.items():
             seq_id = id_chain.split('_')[0]
             set_type = set_mapping.get(seq_id)
