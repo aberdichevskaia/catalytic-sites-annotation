@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import logging
 import os
 import re
 import sys
 import argparse
 from glob import glob
 from typing import List, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 # Set SCANNET_ROOT env var to the ScanNet_Ub repository root (see config.example.yaml).
 SCANNET_ROOT = os.environ.get("SCANNET_ROOT", "")
@@ -64,7 +67,7 @@ def main():
 
     files = all_structures(args.structures_dir)
     if not files:
-        print(f"[ERR] No structures found in {args.structures_dir}")
+        logging.error("No structures found in %s", args.structures_dir)
         sys.exit(1)
 
     total = 0
@@ -77,13 +80,12 @@ def main():
         try:
             _, chains = PDBio.load_chains(file=path)
         except Exception as e:
-            print(f"[WARN] skip {acc}: cannot parse structure ({e})")
+            logging.warning("skip %s: cannot parse structure (%s)", acc, e)
             failed += 1
             continue
 
         triples: List[Tuple[str,str,str]] = []
         for ch in chains:
-            # get_full_id() -> (structure_id, model_id, chain_id, ...)
             fid = ch.get_full_id()
             model_id = str(fid[1])
             chain_id = str(fid[2]).strip() or "A"
@@ -95,27 +97,27 @@ def main():
             triples.append((model_id, chain_id, seq))
 
         if not triples:
-            print(f"[WARN] {acc}: no sequences extracted; skipping")
+            logging.warning("%s: no sequences extracted; skipping", acc)
             skipped += 1
             continue
 
         for model_id, chain_id, seq in triples:
             total += 1
-            out_name = target_msa_name(acc, model_id, chain_id)   # e.g. MSA_Q8NHM5_0_A.fasta
+            out_name = target_msa_name(acc, model_id, chain_id)
             out_file = os.path.join(out_dir, out_name)
             if args.only_missing and os.path.exists(out_file):
                 skipped += 1
                 continue
             try:
-                print(f"[MSA] {acc} {model_id}_{chain_id} -> {out_file}")
+                logging.info("%s %s_%s -> %s", acc, model_id, chain_id, out_file)
                 build_one_msa(seq, out_file, cores=args.cores_per_job)
                 done += 1
             except Exception as e:
-                print(f"[FAIL] {acc} {model_id}_{chain_id}: {e}")
+                logging.error("%s %s_%s: %s", acc, model_id, chain_id, e)
                 failed += 1
 
-    print(f"[SUMMARY] targets: {total} | built: {done} | skipped: {skipped} | failed: {failed}")
-    print(f"[HINT] Now run predict.py with: --use_msa --msa_dir {out_dir}")
+    logging.info("targets: %d | built: %d | skipped: %d | failed: %d", total, done, skipped, failed)
+    logging.info("Now run predict.py with: --use_msa --msa_dir %s", out_dir)
 
 if __name__ == "__main__":
     main()

@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import logging
 import os
 import pickle
 import re
@@ -18,6 +19,8 @@ from scipy.spatial import cKDTree
 
 import warnings
 warnings.filterwarnings("ignore")
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 pdbl = PDBList()
 parser = MMCIFParser()
@@ -88,7 +91,7 @@ def parse_biological_assembly(pdb_id):
         structure = parser.get_structure(pdb_id, cif_filename)
         return structure
     except Exception as e:
-        print(f"[DEBUG] Error parsing biological assembly for {pdb_id}: {e}")
+        logging.debug("Error parsing biological assembly for %s: %s", pdb_id, e)
         return None
 
 def chains_are_in_contact(chain1, chain2, threshold_c_alpha=8.0, threshold_heavy=4.0):
@@ -158,7 +161,7 @@ def map_catalytic_sites(uniprot_seq, pdb_seq, uniprot_catalytic_sites):
     try:
         alignment = next(aligner.align(uniprot_seq, pdb_seq))
     except Exception as e:
-        print(f"[DEBUG] Alignment error: {e}")
+        logging.debug("Alignment error: %s", e)
         return [0] * len(pdb_seq)
     pdb_catalytic_sites = [0] * len(pdb_seq)
     aligned_u = alignment.aligned[0]  # list of (start, end) tuples for UniProt
@@ -196,11 +199,11 @@ def parse_chain_ranges(chain_ranges: str):
             start, end = map(int, ranges.split('-'))
             chain_dict[chain_id] = (start, end)
         except Exception as e:
-            print(f"[DEBUG] Error parsing chain_ranges '{chain}': {e}")
+            logging.debug("Error parsing chain_ranges %r: %s", chain, e)
     return chain_dict
 
 def process_batch(data_batch, batch_num, output_dir):
-    print(f"[INFO] Starting batch {batch_num}, proteins in batch: {len(data_batch)}")
+    logging.info("Starting batch %d, proteins in batch: %d", batch_num, len(data_batch))
     output = []
     proteins_table = dict()
     processed = 0
@@ -208,18 +211,18 @@ def process_batch(data_batch, batch_num, output_dir):
     for idx, result in enumerate(data_batch):
         try:
             primary_accession = result.get('primaryAccession', 'unknown')
-            print(f"[DEBUG] Processing protein {primary_accession} ({idx+1}/{len(data_batch)})")
+            logging.debug("Processing protein %s (%d/%d)", primary_accession, idx+1, len(data_batch))
             uniprot_sequence = result['sequence']['value']
             features = result.get('features', [])
             uniprot_catalytic_sites = [0] * len(uniprot_sequence)
             ec_number = extract_ec_number(result.get('proteinDescription', {}))
             if ec_number is None:
-                print(f"[DEBUG] EC number not found for {primary_accession}")
+                logging.debug("EC number not found for %s", primary_accession)
                 ec_number = "not found"
             try:
                 full_name = result['proteinDescription']['recommendedName']['fullName']['value']
             except Exception as e:
-                print(f"[DEBUG] Full name not found for {primary_accession}: {e}")
+                logging.debug("Full name not found for %s: %s", primary_accession, e)
                 full_name = "not found"
                 
             evidence_codes = set()
@@ -249,7 +252,7 @@ def process_batch(data_batch, batch_num, output_dir):
                             if pos - 1 < len(uniprot_catalytic_sites):
                                 uniprot_catalytic_sites[pos - 1] = 1
                     except Exception as e:
-                        print(f"[DEBUG] Error processing active site for {primary_accession}: {e}")
+                        logging.debug("Error processing active site for %s: %s", primary_accession, e)
 
             output_sequence(output, protein_id=primary_accession, chain='A',
                             positions=range(1, len(uniprot_sequence) + 1),
@@ -284,12 +287,14 @@ def process_batch(data_batch, batch_num, output_dir):
                                                 positions=pdb_positions, sequence=pdb_sequence,
                                                 catalytic_sites=pdb_catalytic_sites)
                     except Exception as e:
-                        print(f"[DEBUG] Error processing PDB for {primary_accession}, pdb_id {cross_reference.get('id')}: {e}")
+                        logging.debug("Error processing PDB for %s, pdb_id %s: %s",
+                                      primary_accession, cross_reference.get('id'), e)
 
             processed += 1
 
         except Exception as e:
-            print(f"[ERROR] Skipping protein {result.get('primaryAccession', 'unknown')} due to error: {e}")
+            logging.error("Skipping protein %s due to error: %s",
+                          result.get('primaryAccession', 'unknown'), e)
             continue
 
     annotations_file = os.path.join(output_dir, f"batch{batch_num}_annotations.pkl")
@@ -299,9 +304,9 @@ def process_batch(data_batch, batch_num, output_dir):
             pickle.dump(output, f)
         with open(table_file, 'w') as f:
             json.dump(proteins_table, f, indent=4)
-        print(f"[INFO] Batch {batch_num} saved. Proteins processed: {processed}")
+        logging.info("Batch %d saved. Proteins processed: %d", batch_num, processed)
     except Exception as e:
-        print(f"[ERROR] Error saving files for batch {batch_num}: {e}")
+        logging.error("Error saving files for batch %d: %s", batch_num, e)
 
 # ---------------------- Entry point ----------------------
 def main():
@@ -323,12 +328,13 @@ def main():
         with open(args.input_file) as f:
             results = json.load(f)
     except Exception as e:
-        raise SystemExit(f"[FATAL] Cannot open input file {args.input_file}: {e}")
+        raise SystemExit(f"Cannot open input file {args.input_file}: {e}")
 
     total = len(results)
     batch_size = (total + args.num_batches - 1) // args.num_batches
 
-    print(f"[INFO] Total proteins: {total}. Processing {args.num_batches} batches of ~{batch_size} each.")
+    logging.info("Total proteins: %d. Processing %d batches of ~%d each.",
+                 total, args.num_batches, batch_size)
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -336,9 +342,9 @@ def main():
         batch_start = i * batch_size
         batch_end = min((i + 1) * batch_size, total)
         data_batch = results[batch_start:batch_end]
-        print(f"[INFO] Processing batch {i+1}: proteins {batch_start}–{batch_end}")
+        logging.info("Processing batch %d: proteins %d–%d", i+1, batch_start, batch_end)
         process_batch(data_batch, i + 1, args.output_dir)
-        print(f"[INFO] Batch {i+1} done.\n")
+        logging.info("Batch %d done.", i+1)
 
 if __name__ == "__main__":
     main()
