@@ -14,8 +14,6 @@ from sklearn.metrics import precision_recall_curve, auc
 
 
 # ---------------------------
-# Plotting & saving (твой стиль)
-# ---------------------------
 
 def make_PR_curve(labels, predictions, weights, subset_name,
                   title="", figsize=(10, 10), margin=0.05, grid=0.1, fs=16):
@@ -180,7 +178,6 @@ def build_labels_preds_for_split(split_txt: str, blast_csv: str):
         true_set: Set[int] = row["true_set"]
         L = len(seq)
 
-        # hard baseline scores: 1.0 на предсказанных позициях, 0.0 — иначе
         pred_set = pred_map.get(qid, set())
         y_true = np.zeros(L, dtype=np.int8)
         if true_set:
@@ -194,7 +191,7 @@ def build_labels_preds_for_split(split_txt: str, blast_csv: str):
 
         labels.append(y_true)
         preds.append(y_pred)
-        weights.append(1.0)     # <- при желании заменим на веса из dataset.csv
+        weights.append(1.0)
         ids.append(qid)
         splits.append(split_name)
 
@@ -208,9 +205,9 @@ def build_labels_preds_for_split(split_txt: str, blast_csv: str):
 def run_eval(splits_glob: str, blast_dir: str, out_dir: str,
              model_name="BLAST-baseline", title_prefix="BLAST PR"):
     """
-    Для каждого splitX.txt ищет соответствующий blast_splitX.csv в blast_dir,
-    строит labels/preds и рисует PR-кривую.
-    Также считает «overall» (всё вместе).
+    For each splitX.txt, finds the corresponding blast_splitX.csv in blast_dir,
+    builds labels/preds and plots a PR curve.
+    Also computes an 'overall' aggregate across all splits.
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
@@ -226,7 +223,6 @@ def run_eval(splits_glob: str, blast_dir: str, out_dir: str,
 
         labels, preds, weights, ids, splits = build_labels_preds_for_split(split_txt, blast_csv)
 
-        # Сохраняем per-split
         save_subset_results(
             output_dir=out_dir,
             subset_key=split_name,
@@ -240,7 +236,6 @@ def run_eval(splits_glob: str, blast_dir: str, out_dir: str,
             batch_size=None
         )
 
-        # Копим для overall
         all_labels.extend(labels)
         all_preds .extend(preds)
         all_weights.extend(weights)

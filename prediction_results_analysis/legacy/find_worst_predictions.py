@@ -26,13 +26,13 @@ def sanitize_vectors(y_true_raw, y_score_raw):
 
 def per_sample_metrics(y_true_raw, y_score_raw, k=5, fp_th=0.3):
     """
-    Возвращает:
+    Returns:
       AUPRC,
       F@k (TP@k/min(#pos,k)),
-      FP@k (все отрицательные в топ-k),
-      CFP@k (только FP с score>=fp_th),
-      max_FP_score@k (0 если FP нет),
-      topk_idx (индексы по валидированному вектору)
+      FP@k (all negatives in top-k),
+      CFP@k (only FP with score>=fp_th),
+      max_FP_score@k (0 if no FP),
+      topk_idx (indices into the validated vector)
     """
     y_true, y_score = sanitize_vectors(y_true_raw, y_score_raw)
     if y_true.size == 0:
@@ -48,7 +48,6 @@ def per_sample_metrics(y_true_raw, y_score_raw, k=5, fp_th=0.3):
     fp_mask = (topk_labels == 0)
     fp = int(fp_mask.sum())
 
-    # confident FP: отрицательные в топ-k с score >= fp_th
     cfp_mask = fp_mask & (topk_scores >= fp_th)
     cfp = int(cfp_mask.sum())
 
@@ -61,17 +60,17 @@ def analyze_file(results_path, k=5, topn=10, fp_th=0.3, csv_out=None, dump_conf_
     d = load_results(results_path)
     preds = d["predictions"]
     labels = d["labels"]
-    pids = d.get("protein_ids")  # предпочтительно использовать уже сохранённые ID
-    ds_names = d.get("dataset_names")  # не обязателен, если есть pids
+    pids = d.get("protein_ids")
+    ds_names = d.get("dataset_names")
 
     if pids is None:
-        raise RuntimeError("В результате нет 'protein_ids'. Для уверенных FP лучше мерджить с protein_ids.")
+        raise RuntimeError("'protein_ids' not found in results. Confident FP analysis requires protein_ids.")
 
     n = min(len(preds), len(labels), len(pids))
     preds, labels, pids = preds[:n], labels[:n], pids[:n]
 
     rows = []
-    conf_fp_positions = []  # список (protein_id, resid_idx, score) только для score>=fp_th и FP в топ-k
+    conf_fp_positions = []  # list of (protein_id, resid_idx, score) for FP in top-k with score>=fp_th
     for i in range(n):
         auprc, f_at_k, fp, cfp, max_fp_score, topk = per_sample_metrics(labels[i], preds[i], k=k, fp_th=fp_th)
         rows.append({
@@ -92,7 +91,6 @@ def analyze_file(results_path, k=5, topn=10, fp_th=0.3, csv_out=None, dump_conf_
     title = os.path.basename(results_path)
     print(f"\n=== {title} ===  samples={n}  (τ={fp_th})")
 
-    # Ранжируем "самые уверенные FP" по двум критериям:
     worst_by_cfp = sorted(rows, key=lambda r: r[f"CFP@{k}(≥{fp_th})"], reverse=True)[:topn]
     worst_by_maxfp = sorted(rows, key=lambda r: r["max_FP_score@k"], reverse=True)[:topn]
 

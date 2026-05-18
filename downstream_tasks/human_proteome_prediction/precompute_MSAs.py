@@ -31,32 +31,23 @@ def entry_from_path(path: str) -> str:
 
 def all_structures(structures_dir: str) -> List[str]:
     structures_dir = ensure_slash(structures_dir)
-    # предпочитаем .cif, но посчитаем из любого формата
     cif = glob(os.path.join(structures_dir, "*.cif"))
     pdb = glob(os.path.join(structures_dir, "*.pdb"))
-    # если один и тот же ACC встречается в обоих форматах, оставим .cif
     seen = {}
     for p in cif + pdb:
         acc = entry_from_path(p)
         if acc not in seen:
             seen[acc] = p
         else:
-            # заменить .pdb на .cif при наличии
             if seen[acc].lower().endswith(".pdb") and p.lower().endswith(".cif"):
                 seen[acc] = p
     return list(seen.values())
 
 def target_msa_name(acc: str, model_id: str, chain_id: str) -> str:
-    # формат, который ожидает predict_bindingsites при assembly=True:
-    # 'MSA_<query_name>_<model>_<chain>.fasta'
-    # где query_name у нас == ACC
     return f"MSA_{acc}_{model_id}_{chain_id}.fasta"
 
 def build_one_msa(sequence: str, out_file: str, cores: int) -> None:
-    # sequence_utils.call_mmseqs сам создаст *.fasta; нужно, чтобы директория существовала и была доступна на запись
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    # выбираем mmseqs или hhblits — библиотека сама возьмёт из pipeline,
-    # но тут напрямую вызовем mmseqs (обычно fastest и настроен у вас)
     sequence_utils.call_mmseqs(sequence, out_file, cores=cores)
 
 def main():
@@ -84,13 +75,12 @@ def main():
     for path in files:
         acc = entry_from_path(path)
         try:
-            _, chains = PDBio.load_chains(file=path)  # возвращает список chain_obj
+            _, chains = PDBio.load_chains(file=path)
         except Exception as e:
             print(f"[WARN] skip {acc}: cannot parse structure ({e})")
             failed += 1
             continue
 
-        # составим пары (model_id, chain_id, sequence)
         triples: List[Tuple[str,str,str]] = []
         for ch in chains:
             # get_full_id() -> (structure_id, model_id, chain_id, ...)

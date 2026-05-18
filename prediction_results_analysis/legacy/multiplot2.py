@@ -13,7 +13,7 @@ def calculate_F(file_path, max_k=20):
     weights = np.array(data['weights'])
     
     F_k = np.zeros(max_k)
-    for k in range(1, max_k + 1):  # k теперь начинается с 1
+    for k in range(1, max_k + 1):  # k starts at 1 (not 0)
         top_k_true = []
         min_k_values = []
         for i in range(len(labels)):
@@ -25,7 +25,6 @@ def calculate_F(file_path, max_k=20):
             min_k_values.append(min(np.sum(true_labels), k) * weight_i)
         F_k[k - 1] = np.sum(top_k_true) / np.sum(min_k_values)
     
-    # Добавляем нулевое значение в начало
     F_k = np.insert(F_k, 0, 0)
     return F_k
 

@@ -348,7 +348,7 @@ def sets_to_arrays(qdf: pd.DataFrame, pred_map: Dict[str, Set[int]], id2w: Dict[
             w = 1.0
         weights.append(w)
         ids.append(qid)
-        splits.append("")  # не используем
+        splits.append("")  # unused
     return labels, preds, weights, ids, splits
 
 
@@ -571,7 +571,7 @@ def main():
             shutil.rmtree(tmp_db, ignore_errors=True)
 
     # Overall summary
-    # Собираем из файлов, чтобы не держать всё в памяти и быть устойчивыми к падениям
+    # Collect from files to avoid holding everything in memory and to be resilient to failures
     frames = []
     for p in sorted(out_root.glob("fold*/metrics_fold*_*.*")):
         if p.name.endswith(".csv") and "metrics_fold" in p.name:

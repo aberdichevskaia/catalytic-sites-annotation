@@ -72,7 +72,7 @@ def main():
         print("  Top-10 shortest sequences:")
         print("    " + ", ".join(top10_short))
         print("  Sequences with no positive labels:")
-        print("    " + (", ".join(no_pos) if no_pos else "— нет ни одного"))
+        print("    " + (", ".join(no_pos) if no_pos else "— none"))
         print()
 
 if __name__ == "__main__":

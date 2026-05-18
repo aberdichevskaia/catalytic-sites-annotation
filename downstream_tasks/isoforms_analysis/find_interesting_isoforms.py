@@ -99,7 +99,6 @@ def parse_predicted_positions(cell) -> set[int]:
             else:
                 # If not a triplet, attempt to extract numbers defensively.
                 try:
-                    # If elem is already a number or a numeric string.
                     pos = int(elem)
                     if pos > 0:
                         positions.add(pos)

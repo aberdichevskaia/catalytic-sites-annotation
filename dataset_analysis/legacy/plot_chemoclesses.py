@@ -7,7 +7,7 @@ from collections import defaultdict
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# --- пути ---
+# --- paths ---
 
 DATASET_CSV = (
     "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/"
@@ -23,10 +23,10 @@ OUTPUT_HEATMAP_PNG = "chemclass_split_heatmap_rownorm.png"
 OUTPUT_HEATMAP2_PNG = "chemclass_split_heatmap_colnorm.png"
 
 
-# --- хемоклассы, как у тебя ---
+# --- catalytic chemotypes ---
 
 def get_catalytic_class(residues):
-    """residues: список аминокислот в каталитических позициях."""
+    """residues: list of amino acids at catalytic positions."""
     if any(r in residues for r in "ILMVWF"):
         return 0
     if any(r in residues for r in "AGP"):
@@ -56,13 +56,13 @@ CLASS_LABELS = {
 }
 
 
-# --- парсинг split*.txt ---
+# --- split*.txt parsing ---
 
 def parse_splits(split_pattern: str, n_splits: int = 5):
     """
-    Читает split{i}.txt и возвращает:
-    - seq_to_split: Sequence_ID (полный, типа A0A1L8G2K9_A) -> 'split1'..'split5'
-    - residues_by_seq: Sequence_ID -> список каталитических аминокислот
+    Read split{i}.txt and return:
+    - seq_to_split: Sequence_ID (full, e.g. A0A1L8G2K9_A) -> 'split1'..'split5'
+    - residues_by_seq: Sequence_ID -> list of catalytic amino acids
     """
     seq_to_split = {}
     residues_by_seq = defaultdict(list)
@@ -83,10 +83,9 @@ def parse_splits(split_pattern: str, n_splits: int = 5):
                 nonlocal current_chain, aas, labs
                 if current_chain is None:
                     return
-                seq_id = current_chain  # без обрезания префикса
+                seq_id = current_chain
                 cat_res = [aa for aa, lab in zip(aas, labs) if lab == 1]
                 residues_by_seq[seq_id].extend(cat_res)
-                # запоминаем сплит
                 if seq_id in seq_to_split:
                     if seq_to_split[seq_id] != split_name:
                         raise ValueError(
@@ -126,11 +125,10 @@ def build_chemclass_split_table(dataset_csv: str,
                                 seq_to_split: dict,
                                 residues_by_seq: dict) -> pd.DataFrame:
     """
-    Собирает counts-таблицу: chem_class_label × split.
+    Build a counts table: chem_class_label x split.
     """
     df = pd.read_csv(dataset_csv).drop_duplicates(subset=["Sequence_ID"])
 
-    # пересечение ID
     known_ids = set(df["Sequence_ID"])
     ids_in_splits = set(seq_to_split.keys())
     common = known_ids & ids_in_splits
@@ -142,10 +140,8 @@ def build_chemclass_split_table(dataset_csv: str,
     if df.empty:
         print("[WARN] After filtering by split IDs, dataset is empty!")
 
-    # добавим сплит
     df["Split"] = df["Sequence_ID"].map(seq_to_split)
 
-    # хемокласс
     def seq_to_class(seq_id: str) -> int:
         residues = residues_by_seq.get(seq_id, [])
         return get_catalytic_class(residues)
@@ -155,7 +151,6 @@ def build_chemclass_split_table(dataset_csv: str,
 
     table_counts = pd.crosstab(df["ChemClassLabel"], df["Split"])
 
-    # отсортируем сплиты
     if not table_counts.empty:
         split_cols = sorted(
             table_counts.columns,
@@ -232,7 +227,7 @@ def plot_heatmap_col_normalized(table_counts: pd.DataFrame, output_png: str):
 
 def plot_heatmap_row_normalized(table_counts: pd.DataFrame, output_png: str):
     """
-    Хитмап по долям внутри каждого хемокласса (строки нормированы).
+    Heatmap of fractions within each chemotype (rows normalized to 1).
     """
     if table_counts.empty:
         print("[WARN] Empty table, skip heatmap.")
@@ -251,7 +246,6 @@ def plot_heatmap_row_normalized(table_counts: pd.DataFrame, output_png: str):
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # жёстко задаём cmap и диапазон значений
     im = ax.imshow(
         data,
         aspect="auto",
@@ -271,7 +265,6 @@ def plot_heatmap_row_normalized(table_counts: pd.DataFrame, output_png: str):
     ax.set_ylabel("Catalytic chemotype")
     ax.set_title("Relative distribution of catalytic chemotypes across splits")
 
-    # подписи в ячейках
     for i in range(data.shape[0]):
         for j in range(data.shape[1]):
             value = data[i, j]

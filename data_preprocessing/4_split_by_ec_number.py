@@ -257,7 +257,6 @@ for i in range(1, 101):
         print(f"Batch file {batch_file} not found, skipping.")
         
         
-######## правильная таблица ##################
 final_data = []
 
 def process_chains(seq_id, relevant_chains, protein_info, set_type):
@@ -277,14 +276,12 @@ def process_chains(seq_id, relevant_chains, protein_info, set_type):
         })
         
         
-# Обработка каждого белка (uniprot_id) и его связанных pdb_id
 selected_nodes = set(component_mapping) & set(set_mapping)
 
 for seq_id, record in protein_data.items():
     if not seq_id in selected_nodes:
         continue
     set_type = set_mapping.get(seq_id)
-    # Преобразование строки с pdb_ids в список
     pdb_ids = record.get("pdb_ids", [])
 
     # Find chains of this uniprot_id
@@ -304,7 +301,6 @@ for seq_id, record in protein_data.items():
         if relevant_chains_pdb:
             process_chains(pdb_id, relevant_chains_pdb, record, set_type)
 
-# Шаг 4: Сохранение итоговой таблицы
 final_df = pd.DataFrame(final_data)
 final_df.to_csv(final_dataset_path, index=False)
 

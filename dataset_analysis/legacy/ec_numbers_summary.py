@@ -60,7 +60,6 @@ def main():
     df = pd.read_csv(DATASET_CSV)
     print(f"[INFO] Raw rows in dataset.csv: {len(df)}")
 
-    # Use unique Sequence_IDs (как в пайплайне)
     df = df.drop_duplicates(subset=["Sequence_ID"])
     print(f"[INFO] Unique Sequence_ID:       {len(df)}")
 
@@ -99,7 +98,6 @@ def main():
     grouped["EC_top"] = pd.Categorical(grouped["EC_top"], categories=EC_ORDER, ordered=True)
     grouped = grouped.sort_values("EC_top").reset_index(drop=True)
 
-    # Pretty rounding для вывода/CSV
     grouped_rounded = grouped.copy()
     grouped_rounded["total_weight"] = grouped_rounded["total_weight"].round(3)
     grouped_rounded["pct_chains"] = grouped_rounded["pct_chains"].round(2)

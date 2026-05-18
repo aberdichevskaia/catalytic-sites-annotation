@@ -88,21 +88,13 @@ def structure_exists(protein_id, expected_seq=None):
 
 
 def _process_seq(args):
-    """
-    Проверяет одну пару (cl1, uid): 
-    1) наличие структуры для UniProt uid 
-    2) для каждого его pdb_id — тоже проверяем
-    Возвращает (cl1, uid, num_structures, [valid_pdbs]) или None.
-    """
+    """Check one (cl1, uid) pair: verify structure for UniProt uid and all its pdb_ids. Returns (cl1, uid, num_structures, [valid_pdbs]) or None."""
     cl1, uid = args
-    # проверяем UniProt-структуру
     useq = protein_data[uid]["uniprot_sequence"]
     if not structure_exists(uid, useq):
         return None
-    # начальное количество = 1 (сама UniProt)
     cnt = 1
     valid_pdbs = []
-    # пробегаем по pdb_ids
     for pdb in protein_data.get(uid, {}).get("pdb_ids", []):
         if pdb_counter[pdb] == 1 and structure_exists(pdb):
             cnt += 1
@@ -132,39 +124,33 @@ for rec in protein_data.values():
     
 for key, value in pdb_counter.items():
     if value > 1:
-        print(f"PDB {key} встречается {value} раз")
+        print(f"PDB {key} occurs {value} times")
 
 pdb_to_uniprot = {}
 cluster_1_to_seqs = defaultdict(list)
 structures_cnt = {}
 
-# 1) Готовим list of tasks
 tasks = [
     (cl1, uid)
     for cl1, grp in cluster_level_1.groupby("Cluster_1")
     for uid in grp["Sequence_ID"]
 ]
 
-# 2) Параллельно обрабатываем
 with Pool(n_procs) as pool:
     results = pool.map(_process_seq, tasks)
 
-# 3) Собираем успешные результаты
 for item in results:
     if item is None:
         continue
     cl1, uid, cnt, valid_pdbs = item
-    # добавляем UniProt-uid
     cluster_1_to_seqs[cl1].append(uid)
     structures_cnt[uid] = cnt
-    # и все валидные pdb
     for pdb in valid_pdbs:
         cluster_1_to_seqs[cl1].append(pdb)
         pdb_to_uniprot[pdb] = uid
 
 
-    
-# 4) Убираем дубликаты
+
 for cl1 in cluster_1_to_seqs:
     cluster_1_to_seqs[cl1] = list(set(cluster_1_to_seqs[cl1]))
 
@@ -194,12 +180,11 @@ for cl1, seqs in cluster_1_to_seqs.items():
                 "Cluster_2": cluster_1_to_2.get(cl1)
             })
             
-# ==== map every node (UniProt и PDB) to its Cluster_2 ====
+# ==== map every node (UniProt and PDB) to its Cluster_2 ====
 seq_to_c2 = {}
 for cl1, seqs in cluster_1_to_seqs.items():
     c2 = cluster_1_to_2.get(cl1)
     if c2 is None:
-        # логируем, если вдруг кто-то остался без C2
         print(f"Warning: cluster1={cl1} has no Cluster_2")
         continue
     for seq in seqs:
@@ -292,7 +277,6 @@ def _parse_batch_file(fn):
 with Pool(n_procs) as pool:
     all_batches = pool.map(_parse_batch_file, batch_files)
 
-# слить в один словарь
 sequences_dict = {}
 labels_dict   = {}
 no_positive_seqids = set()
@@ -310,7 +294,7 @@ for batch in all_batches:
 
 
 # collect only catalytic residues
-# Собираем mapping chain_id → префикс (UniProt / PDB ID)
+# Build mapping chain_id -> prefix (UniProt / PDB ID)
 all_chains = set(sequences_dict.keys())
 chains_by_prefix = defaultdict(list)
 for chain in all_chains:
@@ -366,7 +350,6 @@ def get_catalytic_class(residues):             # add more classes?
 
 c1_counts = {}
 for cl1, seqs in cluster_1_to_seqs.items():
-    # UniProt-ID — это те seq, которых нет в словаре pdb_to_uniprot
     uni_seqs = [uid for uid in seqs if uid in protein_data]
     c1_counts[cl1] = len(uni_seqs)
     
@@ -376,7 +359,7 @@ missing = {nid
            for comp in subsampled_components
            for nid in comp
            if nid not in seq_to_c2}
-print("Ноды без seq_to_c2:", missing)
+print("Nodes without seq_to_c2 mapping:", missing)
 
 for pdb in missing:
     uid = pdb_to_uniprot.get(pdb)
@@ -524,7 +507,6 @@ def local_refine_swaps_2opt(components_weights, fold_weights, component_fold, n_
             continue
         order = idx[np.argsort(components_weights[idx, 0])]
         small_in_fold.append(order[:max_pairs_per_fold])
-    # пробуем пары фолдов (хватает всех пар; если долго — ограничься топ-3 худшими)
     for a in range(n_splits):
         for b in range(a+1, n_splits):
             A, B = small_in_fold[a], small_in_fold[b]
@@ -555,7 +537,7 @@ def local_refine_swaps_2opt(components_weights, fold_weights, component_fold, n_
     component_fold[j] = a
     return True
 
-# итеративно до «тишины»
+# iterate until no improvement
 # changed = True
 # iters = 0
 # while changed and iters < 100:
@@ -569,11 +551,7 @@ def local_refine_swaps_2opt(components_weights, fold_weights, component_fold, n_
 
 def refine_double_relocate(components_weights, fold_weights, component_fold, n_splits,
                            max_iters=10, max_src_small=80, max_src_large=10, max_targets=3, eps=1e-12):
-    """
-    На каждом проходе выбираем самый тяжёлый фолд и пытаемся перенести сразу ДВЕ компоненты
-    (обычно мелкие) в фолды с наибольшим дефицитом тотала. Оцениваем все пары из ограниченного
-    набора кандидатов; применяем лучший улучшающий ход. Повторяем несколько раз.
-    """
+    """On each pass select the heaviest fold and try to move TWO components at once (usually small ones) to folds with the largest total deficit. Evaluate all pairs from a limited candidate set and apply the best improving move. Repeat for max_iters passes."""
     def fold_score(fw):
         return discrepancy_metric(fw, ideal_fold_weights)
     def global_score(fw_list):
@@ -581,16 +559,13 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
 
     improved_any = False
     for _ in range(max_iters):
-        # выбираем самый "плохой" фолд по minimax-оценке
         scores = [fold_score(w) for w in fold_weights]
         worst = int(np.argmax(scores))
 
-        # дефициты тотала по фолдам относительно идеала
         totals  = np.array([fw[0] for fw in fold_weights])
         target  = ideal_fold_weights[0]
-        deficits = target - totals  # >0 значит недовес
+        deficits = target - totals  # >0 means underweight
 
-        # кандидаты-источники из худшего фолда: в основном мелкие, плюс немного крупных
         in_worst = np.where(np.array(component_fold) == worst)[0]
         if in_worst.size < 2:
             break
@@ -598,7 +573,6 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
         order_desc = order_asc[::-1]
         cand = np.unique(np.concatenate([order_asc[:max_src_small], order_desc[:max_src_large]]))
 
-        # целевые фолды: с наибольшим дефицитом тотала
         tgt = [f for f in np.argsort(-deficits)[:max_targets] if f != worst]
         if not tgt:
             break
@@ -607,17 +581,14 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
         best_gain = 0.0
         best_move = None
 
-        # перебираем пары компонент (i,j) и назначения (k1,k2) — k1/k2 могут совпадать
         from itertools import combinations, product
         pairs = list(combinations(cand, 2))
         for i, j in pairs:
             wi = components_weights[i]; wj = components_weights[j]
             for k1, k2 in product(tgt, repeat=2):
-                # временно применяем двойной перенос
                 fold_weights[worst] -= wi; fold_weights[k1] += wi
                 fold_weights[worst] -= wj; fold_weights[k2] += wj
                 sc = global_score(fold_weights)
-                # откат
                 fold_weights[k2] -= wj; fold_weights[worst] += wj
                 fold_weights[k1] -= wi; fold_weights[worst] += wi
 
@@ -627,8 +598,7 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
                     best_move = (i, j, k1, k2)
 
         if best_move is None:
-            break  # улучшений на этом уровне нет
-        # применяем лучший двойной перенос
+            break  # no improving move found
         i, j, k1, k2 = best_move
         fold_weights[worst] -= components_weights[i]; fold_weights[k1] += components_weights[i]
         fold_weights[worst] -= components_weights[j]; fold_weights[k2] += components_weights[j]
@@ -652,7 +622,6 @@ assert np.allclose(np.sum(fold_weights, axis=0), dataset_weights), "Fold weights
 
 
 
-# === 4) разворачивание на seq_id ===
 split_sets = [set() for _ in range(N_SPLITS)]
 for comp_idx, comp in enumerate(subsampled_components):
     split_sets[component_fold[comp_idx]].update(comp)
@@ -726,11 +695,9 @@ max_W_c2 = 100.0
 def get_parent(cid):
     return pdb_to_uniprot.get(cid.split('_')[0], cid.split('_')[0])
 
-# родитель и число структур у родителя
 final_df['Parent_ID'] = final_df['Sequence_ID'].map(get_parent)
 struct_counts = final_df.groupby('Parent_ID')['Sequence_ID'].nunique()
 
-# сколько Cluster_1 в каждом Cluster_2 (+cap)
 c2_count = final_df.groupby('Cluster_2')['Cluster_1'].nunique()
 final_df['c2_n_cl1']  = final_df['Cluster_2'].map(c2_count).astype(float)
 final_df['c2_capped'] = final_df['c2_n_cl1'].clip(upper=max_W_c2)
@@ -748,7 +715,7 @@ final_df['c1_n_parents'] = final_df['Cluster_1'].map(c1_parent_count).astype(flo
 # W_Sequence = W_Cluster_1 / (#UniProt in Cluster_1)
 final_df['W_Sequence'] = (final_df['W_Cluster_1'] / final_df['c1_n_parents'])
 
-# W_Structure = W_Sequence / (#сstructures for UniProt)
+# W_Structure = W_Sequence / (#structures for UniProt)
 final_df['structures_for_parent'] = final_df['Parent_ID'].map(struct_counts).astype(float)
 final_df['W_Structure'] = final_df['W_Sequence'] / final_df['structures_for_parent']
 

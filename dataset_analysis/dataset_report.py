@@ -77,7 +77,7 @@ matplotlib.rcParams.update({
     "grid.linewidth": 0.5,
     "lines.linewidth": 0.9,
 
-    "svg.fonttype": "path" #"none",  # текст в SVG остаётся текстом
+    "svg.fonttype": "path" #"none",  # text in SVG remains as text (not converted to paths)
 })
 
 
@@ -540,7 +540,7 @@ def save_chemotype_legend(out_svg: str, fontsize: int = 10) -> None:
         for i in range(8)
     ]
 
-    fig = plt.figure(figsize=(W_THIRD, H_SMALL))  # размер не важен: мы tight-crop'нем
+    fig = plt.figure(figsize=(W_THIRD, H_SMALL))  # size does not matter: we tight-crop later
     fig.legend(handles=handles, loc="center left", frameon=False)
 
     fig.savefig(out_svg, dpi=1000, format="png", bbox_inches="tight", pad_inches=0.02)
@@ -747,7 +747,7 @@ def plot_top_accessions_by_pdb_count(
     values = [v for _, v in top][::-1]
 
     fig_h = max(3.2, 0.35 * len(values) + 1.2)
-    fig, ax = plt.subplots(figsize=(W_TWO_THIRDS, H_SMALL))#(figsize=(10.5, fig_h))  # чуть шире, имена длинные
+    fig, ax = plt.subplots(figsize=(W_TWO_THIRDS, H_SMALL))#(figsize=(10.5, fig_h))  # slightly wider for long names
     ax.barh(np.arange(len(values)), values, color=base)
     ax.set_yticks(np.arange(len(values)))
     ax.set_yticklabels(labels, fontsize=5)

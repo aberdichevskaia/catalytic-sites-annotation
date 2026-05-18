@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-#TODO: проверка того, что структура (не важно, pdb или AF) вообще скачиваемая 
-#TODO: заменить biopython на biotite
-#TODO: добавить проверку, что не добавляются "пустые" последовательности, без положительных лейблов
-#TODO: как-то разобраться с pdb, которые относятся к нескольким uniprot. или сразу их удалять, или указывать, какие именно цепи имеются ввиду
+#TODO: verify that the structure (PDB or AF) can actually be downloaded
+#TODO: replace biopython with biotite
+#TODO: add check that sequences without any positive labels are not included
+#TODO: handle PDB entries mapped to multiple UniProt IDs — either drop them or record which chains are intended
 
 import argparse
 import json
@@ -25,9 +25,8 @@ ppb = PPBuilder()
 
 PDB_DIR = ""  # set from --pdb_dir in main()
 
-# ---------------------- Функции для извлечения информации ----------------------
 def extract_ec_number(protein_description):
-    # Исправленная версия извлечения EC номера
+    # EC number extraction — tries multiple locations in the protein description
     try:
         if 'recommendedName' in protein_description:
             if 'ecNumbers' in protein_description['recommendedName']:
@@ -66,20 +65,17 @@ def extract_ec_number(protein_description):
 
 def get_chains_sequences(structure, chain_ids):
     sequences = []
-    # Обрабатываем первую модель (structure[0])
     for chain in structure[0]:
         if chain.id in chain_ids:
             sequence = ""
             positions = []
             for residue in chain:
-                # Учитываем только стандартные остатки
                 if residue.id[0] == ' ':
                     residue_name = residue.resname
                     residue_id = residue.id[1]
                     try:
                         one_letter_code = seq1(residue_name)
                     except Exception as e:
-                        # Если не удалось получить однобуквенный код – пропускаем остаток
                         continue
                     sequence += one_letter_code
                     positions.append(residue_id)
@@ -92,11 +88,10 @@ def parse_biological_assembly(pdb_id):
         structure = parser.get_structure(pdb_id, cif_filename)
         return structure
     except Exception as e:
-        print(f"[DEBUG] Ошибка при парсинге биологической сборки для {pdb_id}: {e}")
+        print(f"[DEBUG] Error parsing biological assembly for {pdb_id}: {e}")
         return None
 
 def chains_are_in_contact(chain1, chain2, threshold_c_alpha=8.0, threshold_heavy=4.0):
-    # Извлекаем CA-атомы и их координаты
     calpha_atoms1 = [atom for atom in chain1.get_atoms() if atom.name == 'CA']
     calpha_atoms2 = [atom for atom in chain2.get_atoms() if atom.name == 'CA']
     if not calpha_atoms1 or not calpha_atoms2:
@@ -104,14 +99,12 @@ def chains_are_in_contact(chain1, chain2, threshold_c_alpha=8.0, threshold_heavy
 
     calpha_coords1 = np.array([atom.get_coord() for atom in calpha_atoms1])
     calpha_coords2 = np.array([atom.get_coord() for atom in calpha_atoms2])
-    
-    # Вычисляем матрицу расстояний между CA-атомами и определяем пары, расстояние между которыми меньше порога
+
     diff = calpha_coords1[:, np.newaxis, :] - calpha_coords2[np.newaxis, :, :]
     is_contact = (diff**2).sum(axis=-1) < threshold_c_alpha**2
     c_alpha_contacts = is_contact.sum()
     heavy_contacts = 0
 
-    # Предварительно вычисляем координаты тяжелых атомов (C, N, O, S) для каждого остатка в обоих цепях
     heavy_coords1 = []
     for residue in chain1.child_list:
         coords = np.array([atom.get_coord() for atom in residue if atom.element in ['C', 'N', 'O', 'S']])
@@ -121,23 +114,17 @@ def chains_are_in_contact(chain1, chain2, threshold_c_alpha=8.0, threshold_heavy
         coords = np.array([atom.get_coord() for atom in residue if atom.element in ['C', 'N', 'O', 'S']])
         heavy_coords2.append(coords)
 
-    # Для каждой пары CA контактов проверяем наличие контакта между тяжелыми атомами соответствующих остатков
     for i, j in np.argwhere(is_contact):
-        # Извлекаем массивы координат для остатка i из chain1 и остатка j из chain2
         coords_i = heavy_coords1[i]
         coords_j = heavy_coords2[j]
-        # Если хотя бы один массив пуст, контакта не будет
         if coords_i.size == 0 or coords_j.size == 0:
             is_heavy_contact = False
         else:
-            # Используем cKDTree для быстрого поиска пар тяжелых атомов в пределах порога
             tree = cKDTree(coords_j)
-            # Ищем соседей для всех точек остатка i
             neighbors = tree.query_ball_point(coords_i, r=threshold_heavy)
             is_heavy_contact = any(len(lst) > 0 for lst in neighbors)
         heavy_contacts += int(is_heavy_contact)
 
-        # Если достигнут порог по CA или по тяжелым атомам, возвращаем True
         if c_alpha_contacts >= 4 or heavy_contacts >= 10:
             return True
 
@@ -162,7 +149,6 @@ def choose_representative_chains(structure, chain_ids):
     return representative_chains
 
 def map_catalytic_sites(uniprot_seq, pdb_seq, uniprot_catalytic_sites):
-    # Используем PairwiseAligner вместо pairwise2
     aligner = PairwiseAligner()
     aligner.mode = "global"
     aligner.match_score = 1
@@ -172,15 +158,14 @@ def map_catalytic_sites(uniprot_seq, pdb_seq, uniprot_catalytic_sites):
     try:
         alignment = next(aligner.align(uniprot_seq, pdb_seq))
     except Exception as e:
-        print(f"[DEBUG] Ошибка при выравнивании: {e}")
+        print(f"[DEBUG] Alignment error: {e}")
         return [0] * len(pdb_seq)
     pdb_catalytic_sites = [0] * len(pdb_seq)
-    aligned_u = alignment.aligned[0]  # Список кортежей (start, end) для Uniprot
-    aligned_p = alignment.aligned[1]  # Список кортежей (start, end) для PDB
+    aligned_u = alignment.aligned[0]  # list of (start, end) tuples for UniProt
+    aligned_p = alignment.aligned[1]  # list of (start, end) tuples for PDB
     for (u_start, u_end), (p_start, p_end) in zip(aligned_u, aligned_p):
         block_length = u_end - u_start
         if (p_end - p_start) != block_length:
-            # Если длины блока не совпадают, пропускаем этот блок
             continue
         for i in range(block_length):
             pdb_index = p_start + i
@@ -211,33 +196,30 @@ def parse_chain_ranges(chain_ranges: str):
             start, end = map(int, ranges.split('-'))
             chain_dict[chain_id] = (start, end)
         except Exception as e:
-            print(f"[DEBUG] Ошибка при разборе chain_ranges '{chain}': {e}")
+            print(f"[DEBUG] Error parsing chain_ranges '{chain}': {e}")
     return chain_dict
 
-# ---------------------- Основная функция обработки батча ----------------------
 def process_batch(data_batch, batch_num, output_dir):
-    print(f"[INFO] Начало обработки батча {batch_num}, белков в батче: {len(data_batch)}")
-    output = []  # для аннотаций
+    print(f"[INFO] Starting batch {batch_num}, proteins in batch: {len(data_batch)}")
+    output = []
     proteins_table = dict()
     processed = 0
 
     for idx, result in enumerate(data_batch):
         try:
             primary_accession = result.get('primaryAccession', 'unknown')
-            print(f"[DEBUG] Обработка белка {primary_accession} ({idx+1}/{len(data_batch)})")
+            print(f"[DEBUG] Processing protein {primary_accession} ({idx+1}/{len(data_batch)})")
             uniprot_sequence = result['sequence']['value']
             features = result.get('features', [])
-            # Инициализируем catalytic_sites (0 для каждого остатка)
             uniprot_catalytic_sites = [0] * len(uniprot_sequence)
-            # Извлекаем EC номер с помощью исправленной функции
             ec_number = extract_ec_number(result.get('proteinDescription', {}))
             if ec_number is None:
-                print(f"[DEBUG] EC number не найден для {primary_accession}")
+                print(f"[DEBUG] EC number not found for {primary_accession}")
                 ec_number = "not found"
             try:
                 full_name = result['proteinDescription']['recommendedName']['fullName']['value']
             except Exception as e:
-                print(f"[DEBUG] Полное имя не найдено для {primary_accession}: {e}")
+                print(f"[DEBUG] Full name not found for {primary_accession}: {e}")
                 full_name = "not found"
                 
             evidence_codes = set()
@@ -248,7 +230,6 @@ def process_batch(data_batch, batch_num, output_dir):
                         if code:
                             evidence_codes.add(code)
                             
-            # Записываем информацию о белке в таблицу
             proteins_table[primary_accession] = {
                 "uniprot_id": primary_accession,
                 "uniprot_sequence": uniprot_sequence,
@@ -259,48 +240,41 @@ def process_batch(data_batch, batch_num, output_dir):
                 "batch_number": batch_num
             }
 
-            # Обработка активных сайтов
             for feature in features:
                 if feature.get('type') == 'Active site':
                     try:
                         start = feature['location']['start']['value']
                         end = feature['location']['end']['value']
                         for pos in range(start, end + 1):
-                            # Проверка выхода за границы
                             if pos - 1 < len(uniprot_catalytic_sites):
                                 uniprot_catalytic_sites[pos - 1] = 1
                     except Exception as e:
-                        print(f"[DEBUG] Ошибка при обработке active site для {primary_accession}: {e}")
+                        print(f"[DEBUG] Error processing active site for {primary_accession}: {e}")
 
-            # Вывод аннотации для Uniprot последовательности (цепь A)
             output_sequence(output, protein_id=primary_accession, chain='A',
                             positions=range(1, len(uniprot_sequence) + 1),
                             sequence=uniprot_sequence, catalytic_sites=uniprot_catalytic_sites)
 
-            # Обработка cross references для PDB
             cross_references = result.get('uniProtKBCrossReferences', [])
             for cross_reference in cross_references:
                 if cross_reference.get('database') == 'PDB':
                     try:
                         pdb_id = cross_reference['id']
-                        # Специфический фикс: если pdb_id == "8V2I", заменяем на "9BP6"
+                        # Specific fix: remap deprecated PDB entry 8V2I to its replacement 9BP6
                         if pdb_id == "8V2I":
                             pdb_id = "9BP6"
                         proteins_table[primary_accession]["pdb_ids"].append(pdb_id)
-                        # Пытаемся получить информацию о цепях из свойства с индексом 2
                         props = cross_reference.get('properties', [])
                         if len(props) < 3:
                             continue
                         chain_ranges_str = props[2].get('value', '')
                         reference_chains_properties = parse_chain_ranges(chain_ranges_str)
                         for chain_id, (fr, to) in reference_chains_properties.items():
-                            # Преобразуем в индексацию с нуля
                             fr, to = fr - 1, to - 1
                             sequences = analyze_PDB_reference(pdb_id, [chain_id])
                             if not sequences:
                                 continue
                             for pdb_chain_id, pdb_sequence, pdb_positions in sequences:
-                                # Маппим catalytic sites для участка белка
                                 pdb_catalytic_sites = map_catalytic_sites(
                                     uniprot_seq=uniprot_sequence[fr:to],
                                     pdb_seq=pdb_sequence,
@@ -310,15 +284,14 @@ def process_batch(data_batch, batch_num, output_dir):
                                                 positions=pdb_positions, sequence=pdb_sequence,
                                                 catalytic_sites=pdb_catalytic_sites)
                     except Exception as e:
-                        print(f"[DEBUG] Ошибка при обработке PDB для {primary_accession}, pdb_id {cross_reference.get('id')}: {e}")
+                        print(f"[DEBUG] Error processing PDB for {primary_accession}, pdb_id {cross_reference.get('id')}: {e}")
 
             processed += 1
 
         except Exception as e:
-            print(f"[ERROR] Пропуск белка {result.get('primaryAccession', 'unknown')} из-за ошибки: {e}")
+            print(f"[ERROR] Skipping protein {result.get('primaryAccession', 'unknown')} due to error: {e}")
             continue
 
-    # Сохраняем файлы батча
     annotations_file = os.path.join(output_dir, f"batch{batch_num}_annotations.pkl")
     table_file = os.path.join(output_dir, f"batch{batch_num}_table.json")
     try:
@@ -326,9 +299,9 @@ def process_batch(data_batch, batch_num, output_dir):
             pickle.dump(output, f)
         with open(table_file, 'w') as f:
             json.dump(proteins_table, f, indent=4)
-        print(f"[INFO] Батч {batch_num} успешно сохранён. Обработано белков: {processed}")
+        print(f"[INFO] Batch {batch_num} saved. Proteins processed: {processed}")
     except Exception as e:
-        print(f"[ERROR] Ошибка при сохранении файлов для батча {batch_num}: {e}")
+        print(f"[ERROR] Error saving files for batch {batch_num}: {e}")
 
 # ---------------------- Entry point ----------------------
 def main():

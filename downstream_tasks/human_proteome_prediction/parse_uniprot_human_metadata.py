@@ -19,15 +19,14 @@ from typing import Dict, Any, Optional, Iterable, List, Tuple, Set
 
 def iter_records_json_gz(path: str) -> Iterable[dict]:
     """
-    Порядок попыток:
-    1) load-весь-файл как единый JSON:
-       - если dict с ключом 'results' -> итерируем results
-       - если list -> итерируем список
-       - если одиночный dict -> одна запись
-    2) NDJSON (по строкам)
-    3) Конкатенированные JSON-объекты без разделителей (raw_decode)
+    Attempt order:
+    1) Load the whole file as a single JSON:
+       - if dict with key 'results' -> iterate results
+       - if list -> iterate the list
+       - if a single dict -> one record
+    2) NDJSON (line by line)
+    3) Concatenated JSON objects without separators (raw_decode)
     """
-    # 1) единый JSON
     try:
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             data = json.load(f)
@@ -42,13 +41,12 @@ def iter_records_json_gz(path: str) -> Iterable[dict]:
                     if isinstance(rec, dict):
                         yield rec
                 return
-            # одиночный словарь как запись
             yield data
             return
     except Exception:
         pass
 
-    # 2) NDJSON
+    # 2) NDJSON (line-by-line)
     try:
         with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
             any_yielded = False
@@ -68,7 +66,7 @@ def iter_records_json_gz(path: str) -> Iterable[dict]:
     except Exception:
         pass
 
-    # 3) конкатенированные объекты
+    # 3) Concatenated JSON objects (raw_decode)
     dec = json.JSONDecoder()
     buf = ""
     with gzip.open(path, "rt", encoding="utf-8", newline="") as f:
@@ -87,7 +85,6 @@ def iter_records_json_gz(path: str) -> Iterable[dict]:
                 try:
                     obj, j = dec.raw_decode(buf, i)
                 except json.JSONDecodeError:
-                    # нужно больше данных
                     break
                 if isinstance(obj, dict):
                     yield obj
@@ -104,8 +101,8 @@ def iter_records_json_gz(path: str) -> Iterable[dict]:
 
 def is_human(rec: dict, organism_id: int = 9606) -> bool:
     """
-    Пермишсивно: если taxonId отсутствует (часто уже отфильтровано upstream),
-    считаем human; иначе сравниваем.
+    Permissive check: if taxonId is absent (often already filtered upstream),
+    treat as human; otherwise compare.
     """
     org = rec.get("organism") or {}
     tid = org.get("taxonId")
@@ -215,14 +212,14 @@ def extract_ec_numbers(rec: dict) -> list[str]:
     def _from_block(b: dict):
         if not isinstance(b, dict):
             return
-        # старые/редкие варианты: ecNumber: "1.2.3.4" или список строк
+        # legacy/rare: ecNumber: "1.2.3.4" or list of strings
         v = b.get("ecNumber")
         if isinstance(v, str):
             _add(v)
         elif isinstance(v, list):
             for x in v:
                 _add(x)
-        # новый вариант: ecNumbers: [{"value": "1.2.3.4"}, ...] или список строк
+        # current format: ecNumbers: [{"value": "1.2.3.4"}, ...] or list of strings
         v2 = b.get("ecNumbers")
         if isinstance(v2, list):
             for x in v2:
@@ -234,7 +231,7 @@ def extract_ec_numbers(rec: dict) -> list[str]:
     # 1) comments → catalytic activity
     for c in (rec.get("comments") or []):
         if isinstance(c, dict) and c.get("commentType") in {"CATALYTIC_ACTIVITY", "catalytic activity"}:
-            _add(c.get("ecNumber"))  # иногда встречается
+            _add(c.get("ecNumber"))  # occasionally present
             rxn = c.get("reaction") or {}
             _add(rxn.get("ecNumber"))
 
@@ -243,17 +240,17 @@ def extract_ec_numbers(rec: dict) -> list[str]:
         if isinstance(xref, dict) and xref.get("database") == "EC":
             _add(xref.get("id"))
 
-    # 3) proteinDescription во всех ветках
+    # 3) proteinDescription in all branches
     pd = rec.get("proteinDescription") or {}
 
-    # recommendedName + submissionNames/alternativeNames (могут быть list или dict)
+    # recommendedName + submissionNames/alternativeNames (may be list or dict)
     for key in ("recommendedName", "submissionNames", "alternativeNames"):
         block = pd.get(key)
         blocks = block if isinstance(block, list) else [block] if block else []
         for b in blocks:
             _from_block(b)
 
-    # includes / contains: внутри снова могут быть recommendedName/alternativeNames
+    # includes / contains: may again contain recommendedName/alternativeNames
     for key in ("includes", "contains", "fragments"):
         items = pd.get(key) or []
         if not isinstance(items, list):
@@ -263,13 +260,12 @@ def extract_ec_numbers(rec: dict) -> list[str]:
                 continue
             _from_block(it)
             _from_block(it.get("recommendedName") or {})
-            # иногда EC дублируется и в alternativeNames внутри include/contain
+            # EC may also appear in alternativeNames within include/contain blocks
             alts = it.get("alternativeNames")
             alts = alts if isinstance(alts, list) else [alts] if alts else []
             for a in alts:
                 _from_block(a)
 
-    # финал
     return sorted(ecs)
 
 

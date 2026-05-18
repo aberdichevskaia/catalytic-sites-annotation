@@ -393,7 +393,6 @@ def resolve_af_urls(uid: str) -> Dict[str, Optional[str]]:
         d0 = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
         if not isinstance(d0, dict):
             return {}
-        # разные возможные ключи, старые и новые
         candidates_pdb = ["pdbUrl", "modelUrlPDB", "pdb_url"]
         candidates_cif = ["cifUrl", "bcifUrl", "mmCifUrl", "cif_url", "bcif_url", "mmcif_url"]
         def pick(d, keys):
@@ -405,7 +404,6 @@ def resolve_af_urls(uid: str) -> Dict[str, Optional[str]]:
         return {
             "pdb": pick(d0, candidates_pdb),
             "cif": pick(d0, candidates_cif),
-            # entryId → modelEntityId (на части ответов уже так)
             "entryId": d0.get("entryId") or d0.get("modelEntityId"),
         }
     except Exception:

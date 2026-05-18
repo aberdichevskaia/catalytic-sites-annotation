@@ -226,7 +226,6 @@ def self_reconstruct_worker(i):
     submat = align.SubstitutionMatrix.std_protein_matrix()
     taa = G_SELF_AA[i]
     labs = G_SELF_LABELS[i]
-    # локальное выравнивание себя к себе
     aln_list = align.align_optimal(taa, taa, submat, gap_penalty=GAP_PENALTY, local=True)
     aln = aln_list[0]
     g_f, g_o = aln.get_gapped_sequences()

@@ -4,19 +4,21 @@
 """
 Catalytic-site screening over AlphaFold Human proteome (cv_catalytic).
 
-Ключевые моменты:
-- В модель передаём query_names = AF-stem (например, 'AF-P81877-F1-model_v6'),
-  чтобы predict_bindingsites искал MSA ровно как у тебя в папке:
-  'MSA_AF-P81877-F1-model_v6_0_A.fasta' и т.п.
-- Строгое правило: если MSA под таким stem не найден, НЕ строим его, а запускаем без MSA.
-- В CSV показываем "красивый" ID вида 'ACC_F#', метаданные (EC/active sites/names) берём по ACC.
+Key design decisions:
+- The model receives query_names = AF-stem (e.g. 'AF-P81877-F1-model_v6'),
+  so that predict_bindingsites looks for the MSA exactly as stored:
+  'MSA_AF-P81877-F1-model_v6_0_A.fasta', etc.
+- Strict rule: if no MSA is found for a given stem, do NOT build one —
+  run inference without MSA instead.
+- The output CSV uses a human-readable ID of the form 'ACC_F#';
+  metadata (EC / active sites / names) is fetched by ACC.
 
-ESM2 режим:
-- Если задано --use_esm2 --esm2_dir, то:
-  * при наличии кеша <esm2_dir>/<origin[:2]>/<origin>.npy используем cv_catalytic_ESM2
-  * иначе используем дефолтную cv_catalytic_noMSA (fallback для "неудачников")
+ESM2 mode:
+- When --use_esm2 --esm2_dir are set:
+  * if a cache file <esm2_dir>/<origin[:2]>/<origin>.npy exists, use cv_catalytic_ESM2
+  * otherwise fall back to cv_catalytic_noMSA
 
-Выходной CSV:
+Output CSV columns:
 - protein id (uniprot / PDB)  # 'ACC_F#'
 - predicted with 35% threshold
 - predicted with 65% threshold
