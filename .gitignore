@@ -1,5 +1,7 @@
 config.yaml
 *.txt
+!requirements.txt
+!refactoring_plan.txt
 *.csv
 *.pdf
 *.png

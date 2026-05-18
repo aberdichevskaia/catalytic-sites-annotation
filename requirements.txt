@@ -1,0 +1,16 @@
+biopython
+biotite
+matplotlib
+networkx
+numpy
+pandas
+prettytable
+requests
+scikit-learn
+scipy
+seaborn
+tqdm
+
+# ESM2 embeddings (optional — only needed for precompute_esm2_embeddings/)
+torch
+fair-esm
