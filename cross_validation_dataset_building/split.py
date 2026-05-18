@@ -20,32 +20,26 @@ from glob import glob
 from utils.ec_numbers import valid_ec_number
 from utils.data_loading import parse_batch_file
 
-import argparse as _argparse
-_ap = _argparse.ArgumentParser(
-    description="Build 5-fold stratified CV splits balanced by chemical class."
-)
-_ap.add_argument("--cluster_level_1", required=True,
-                 help="Path to cluster_level_1_cluster.tsv (see config.example.yaml)")
-_ap.add_argument("--cluster_level_2", required=True,
-                 help="Path to cluster_level_2_cluster.tsv (see config.example.yaml)")
-_ap.add_argument("--protein_table", required=True,
-                 help="EC-filtered protein table JSON (see config.example.yaml: protein_table_modified)")
-_ap.add_argument("--batches_dir", required=True,
-                 help="Directory with batch*_annotations.pkl (see config.example.yaml: batches_dir)")
-_ap.add_argument("--pdb_dir", required=True,
-                 help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
-_ap.add_argument("--output_dir", required=True,
-                 help="Output directory for CV splits (see config.example.yaml: cv_dir)")
-_args = _ap.parse_args()
+import argparse
 
-random.seed(42)
-np.random.seed(42)
-
-n_procs = min(128, cpu_count())
-
-PDB_DIR        = _args.pdb_dir
+# ---------------------------------------------------------------------------
+# Module-level globals — set inside main() via `global` before Pool.map()
+# calls so that forked workers inherit the populated values.
+# ---------------------------------------------------------------------------
+PDB_DIR        = ""
+protein_data   = {}
+pdb_counter    = Counter()
+chains_by_prefix = defaultdict(list)
+sequences_dict = {}
+labels_dict    = {}
+N_CLASSES      = 8
+N_SPLITS       = 5
+ideal_fold_weights = None
 
 
+# ---------------------------------------------------------------------------
+# Worker / helper functions (module-level so multiprocessing can find them)
+# ---------------------------------------------------------------------------
 
 def structure_exists(protein_id, expected_seq=None):
     try:
@@ -57,7 +51,7 @@ def structure_exists(protein_id, expected_seq=None):
         print(f"[DOWNLOAD ERROR] {protein_id}: {err}")
         return False
 
-    # Get aminoacid sequence from the structure file 
+    # Get aminoacid sequence from the structure file
     try:
         cif = pdbx.CIFFile.read(cif_path)
         chains_sequences = pdbx.get_sequence(cif)
@@ -68,7 +62,7 @@ def structure_exists(protein_id, expected_seq=None):
         print(f"  → Deleted {cif_path}")
         return False
 
-    # Compare sequences, remove if doesn't match 
+    # Compare sequences, remove if doesn't match
     if expected_seq != None:
         try:
             struct_seq = str(chains_sequences.get("A"))
@@ -78,12 +72,12 @@ def structure_exists(protein_id, expected_seq=None):
             os.remove(cif_path)
             print(f"  → Deleted {cif_path}")
             return False
-        if struct_seq != expected_seq:  
+        if struct_seq != expected_seq:
             print(f"[MISMATCH] {protein_id}: expected {len(expected_seq)} aa, got {len(struct_seq)} aa")
             os.remove(cif_path)
             print(f"  → Deleted {cif_path}")
             return False
-    
+
     return True
 
 
@@ -102,218 +96,9 @@ def _process_seq(args):
     return cl1, uid, cnt, valid_pdbs
 
 
-cluster_level_1_path = _args.cluster_level_1
-cluster_level_2_path = _args.cluster_level_2
-protein_table_path   = _args.protein_table
-pkl_folder_path      = _args.batches_dir
-output_dir           = _args.output_dir
-final_dataset_path   = os.path.join(output_dir, "dataset.csv")
-
-os.makedirs(output_dir, exist_ok=True)
-
-cluster_level_1 = pd.read_csv(cluster_level_1_path, sep='\t', header=None,
-                              names=['Cluster_1', 'Sequence_ID'])
-cluster_level_2 = pd.read_csv(cluster_level_2_path, sep='\t', header=None,
-                              names=['Cluster_2', 'Centroid_ID'])
-with open(protein_table_path) as f:
-    protein_data = json.load(f)
-
-pdb_counter = Counter()
-for rec in protein_data.values():
-    pdb_counter.update(rec.get("pdb_ids", []))
-    
-for key, value in pdb_counter.items():
-    if value > 1:
-        print(f"PDB {key} occurs {value} times")
-
-pdb_to_uniprot = {}
-cluster_1_to_seqs = defaultdict(list)
-structures_cnt = {}
-
-tasks = [
-    (cl1, uid)
-    for cl1, grp in cluster_level_1.groupby("Cluster_1")
-    for uid in grp["Sequence_ID"]
-]
-
-with Pool(n_procs) as pool:
-    results = pool.map(_process_seq, tasks)
-
-for item in results:
-    if item is None:
-        continue
-    cl1, uid, cnt, valid_pdbs = item
-    cluster_1_to_seqs[cl1].append(uid)
-    structures_cnt[uid] = cnt
-    for pdb in valid_pdbs:
-        cluster_1_to_seqs[cl1].append(pdb)
-        pdb_to_uniprot[pdb] = uid
-
-
-
-for cl1 in cluster_1_to_seqs:
-    cluster_1_to_seqs[cl1] = list(set(cluster_1_to_seqs[cl1]))
-
-    
-seq_to_c1 = {}
-for cl1, seqs in cluster_1_to_seqs.items():
-    for seq in seqs:
-        seq_to_c1[seq] = cl1
-
-centroid_to_c2 = {r['Centroid_ID']: r['Cluster_2'] for _, r in cluster_level_2.iterrows()}
-cluster_2_to_1 = defaultdict(list)
-for cl1, seqs in cluster_1_to_seqs.items():
-    c2 = centroid_to_c2.get(cl1)
-    if c2:
-        cluster_2_to_1[c2].append(cl1)
-
-cluster_1_to_2 = {}
-for c2, cls in cluster_2_to_1.items():
-    for cl1 in cls:
-        cluster_1_to_2[cl1] = c2
-
-for cl1, seqs in cluster_1_to_seqs.items():
-    for uid in seqs:
-        if uid in protein_data:
-            protein_data[uid].update({
-                "Cluster_1": cl1,
-                "Cluster_2": cluster_1_to_2.get(cl1)
-            })
-            
-# ==== map every node (UniProt and PDB) to its Cluster_2 ====
-seq_to_c2 = {}
-for cl1, seqs in cluster_1_to_seqs.items():
-    c2 = cluster_1_to_2.get(cl1)
-    if c2 is None:
-        print(f"Warning: cluster1={cl1} has no Cluster_2")
-        continue
-    for seq in seqs:
-        seq_to_c2[seq] = c2
-
-# sanity check
-missing = [n for cl in cluster_1_to_seqs.values() for n in cl if n not in seq_to_c2]
-if missing:
-    print("Nodes without seq_to_c2 mapping:", missing)
-
-
-# create a graph
-valid_nodes = set(seq_to_c2.keys())
-
-G = nx.Graph()
-G.add_nodes_from(valid_nodes)
-
-for pdb, uni in pdb_to_uniprot.items():
-    if pdb in valid_nodes and uni in valid_nodes:
-        G.add_edge(uni, pdb)
-
-# edges by Cluster_2 over ALL seq_to_c2 nodes (UniProt + PDB)
-by_c2 = defaultdict(list)
-for seq, c2 in seq_to_c2.items():
-    by_c2[c2].append(seq)
-for seqs in by_c2.values():
-    if len(seqs) > 1:
-        G.add_edges_from(combinations(seqs, 2))
-
-# edges by EC
-uids = list(protein_data.keys())
-ecs  = []
-for uid in uids:
-    ec = protein_data[uid].get("EC_number", "not found")
-    if valid_ec_number(ec):
-        ec = '.'.join(ec.split('.')[:3])
-    else:
-        ec = "not found"
-    ecs.append(ec)
-
-ec_map = defaultdict(list)
-for uid, ec in zip(uids, ecs):
-    if ec != "not found":
-        ec_map[ec].append(uid)
-        
-for ec, uids in ec_map.items():
-    filt = [u for u in uids if u in valid_nodes]
-    if len(filt) > 1:
-        G.add_edges_from(combinations(filt, 2))
-
-components = list(nx.connected_components(G))
-
-# print EC numbers for each component 
-def trunc(ec): return '.'.join(ec.split('.')[:3]) if ec!="not found" else ec
-for i, comp in enumerate(components, 1):
-    ecs = {trunc(protein_data[n].get("EC_number","not found")) for n in comp if n in protein_data}
-    tag = "single" if len(ecs)==1 else f"multiple {ecs}"
-    print(f"Component {i}: {tag}, size={len(comp)}")
-
-# round-robin to subsample big components
-max_comp_size = 3000
-subsampled_components = []
-for comp in components:
-    if len(comp) <= max_comp_size:
-        subsampled_components.append(list(comp))
-    else:
-        by_c2 = defaultdict(list)
-        for uid in comp:
-            by_c2[seq_to_c2.get(uid)].append(uid)
-        for lst in by_c2.values():
-            random.shuffle(lst)
-        keys = list(by_c2)
-        idxs = {k:0 for k in keys}
-        sel = []
-        while len(sel) < max_comp_size:
-            for k in keys:
-                if idxs[k] < len(by_c2[k]):
-                    sel.append(by_c2[k][idxs[k]])
-                    idxs[k] += 1
-                if len(sel) >= max_comp_size:
-                    break
-        subsampled_components.append(sel)
-
-# parse annotations to get labels and amino acids
-batch_files = glob(os.path.join(pkl_folder_path, "batch*_annotations.pkl"))
-
 def _parse_batch_file(fn):
     return parse_batch_file(fn)
 
-with Pool(n_procs) as pool:
-    all_batches = pool.map(_parse_batch_file, batch_files)
-
-sequences_dict = {}
-labels_dict   = {}
-no_positive_seqids = set()
-for batch in all_batches:
-    for chain_id, ann in batch.items():
-        seq  = []
-        labs = []
-        for line in ann:
-            aa, lab = line.strip().split()[2], int(line.strip().split()[3])
-            seq.append(aa); labs.append(lab)
-        if sum(labs)==0:
-            no_positive_seqids.add(chain_id)
-        sequences_dict[chain_id] = "".join(seq)
-        labels_dict  [chain_id] = labs
-
-
-# collect only catalytic residues
-# Build mapping chain_id -> prefix (UniProt / PDB ID)
-all_chains = set(sequences_dict.keys())
-chains_by_prefix = defaultdict(list)
-for chain in all_chains:
-    prefix = chain.rsplit('_', 1)[0]
-    chains_by_prefix[prefix].append(chain)
-
-annotated_prefixes = set(chains_by_prefix.keys())
-print(f"Annotated sequences: {annotated_prefixes}")
-
-filtered_components = []
-for comp in subsampled_components:
-    good = [seq_id for seq_id in comp if seq_id in annotated_prefixes]
-    missing = set(comp) - set(good)
-    if missing:
-        print(f"Deleted seq_id without annotations: {missing}")
-    if good:
-        filtered_components.append(good)
-
-subsampled_components = filtered_components
 
 def _compute_residues_for_seq(seq_id):
     residues = []
@@ -323,152 +108,42 @@ def _compute_residues_for_seq(seq_id):
         residues += [aa for aa, lab in zip(seq, labs) if lab==1]
     return seq_id, residues
 
-# main
-seq_ids = [seq for comp in subsampled_components for seq in comp]
-with Pool(n_procs) as pool:
-    items = pool.map(_compute_residues_for_seq, seq_ids)
-catalytic_residue_dict = dict(items)
 
-# assign class based on chemical properties of catalutic sites
-N_CLASSES = 8
+def trunc(ec): return '.'.join(ec.split('.')[:3]) if ec!="not found" else ec
+
+
 def get_catalytic_class(residues):             # add more classes?
     if any(r in residues for r in "ILMVWF"):
         return 0
-    if any(r in residues for r in "AGP"):   
+    if any(r in residues for r in "AGP"):
         return 1
-    if any(r in residues for r in "QN"):     
+    if any(r in residues for r in "QN"):
         return 2
-    if any(r in residues for r in "KR"):     
+    if any(r in residues for r in "KR"):
         return 3
-    if any(r == "S"  for r in residues):       
+    if any(r == "S"  for r in residues):
         return 4
-    if any(r == "T"  for r in residues):       
+    if any(r == "T"  for r in residues):
         return 5
-    if any(r in residues for r in "DE"):       
+    if any(r in residues for r in "DE"):
         return 6
     return 7
 
-c1_counts = {}
-for cl1, seqs in cluster_1_to_seqs.items():
-    uni_seqs = [uid for uid in seqs if uid in protein_data]
-    c1_counts[cl1] = len(uni_seqs)
-    
-c2_counts = {c2: len(c1s) for c2, c1s in cluster_2_to_1.items()}
-
-missing = {nid
-           for comp in subsampled_components
-           for nid in comp
-           if nid not in seq_to_c2}
-print("Nodes without seq_to_c2 mapping:", missing)
-
-for pdb in missing:
-    uid = pdb_to_uniprot.get(pdb)
-    c1  = seq_to_c1.get(uid)
-    c2  = centroid_to_c2.get(c1)
-    print(f"PDB {pdb} ← UniProt {uid}, Cluster_1={c1}, Cluster_2={c2}")
-
-
-
-# 1) Capped W_Cluster_2
-max_W_c2 = 100.0
-W_c2_by_c2 = {c2: min(max_W_c2, float(cnt)) for c2, cnt in c2_counts.items()}
-
-# 2) per-seq W_Cluster_2 and W_Cluster_1
-W_c2 = {}
-W_c1 = {}
-for comp in subsampled_components:
-    for seq in comp:
-        c2 = seq_to_c2.get(seq)
-        c2_size = float(c2_counts.get(c2, 1))
-        w_c2 = W_c2_by_c2.get(c2, 1.0)           # min(max_W_c2, c2_size)
-        W_c2[seq] = w_c2
-        # W_Cluster_1 = W_c2 / (#Cluster_1 in this Cluster_2) = min(1, max_W_c2 / c2_size)
-        W_c1[seq] = w_c2 / c2_size
-
-# 3) W_Sequence = W_Cluster_1 / (#UniProt in Cluster_1)
-W_sequence = {}
-for comp in subsampled_components:
-    for seq in comp:
-        c1 = seq_to_c1[seq]
-        n_uniprot = float(c1_counts.get(c1, 1))
-        W_sequence[seq] = W_c1[seq] / n_uniprot
-
-# 4) W_Structure = W_Sequence / (#structures for UniProt)
-W_structure = {}
-for comp in subsampled_components:
-    for seq in comp:
-        parent = pdb_to_uniprot.get(seq, seq)
-        n_struct = float(structures_cnt.get(parent, 1))
-        W_structure[seq] = W_sequence[seq] / n_struct
-
-# split into folds
-N_SPLITS=5
-
-components_weights = np.zeros((len(subsampled_components), N_CLASSES + 1), dtype=float)
-for i, comp in enumerate(subsampled_components):
-    # total
-    components_weights[i, 0] = sum(W_structure[s] for s in comp)
-    # classes: 
-    for s in comp:
-        cl = get_catalytic_class(catalytic_residue_dict[s])  # 0..N_CLASSES-1
-        components_weights[i, cl + 1] += W_structure[s]
-
-dataset_weights = components_weights.sum(axis=0)           # shape: (N_CLASSES+1,)
-ideal_fold_weights = dataset_weights / N_SPLITS            # N_SPLITS=5
-print(f"Ideal weights: {list(ideal_fold_weights)}")
-print()
 
 def discrepancy_metric(fold_w, ideal_w):
-    denom = np.maximum(ideal_w, 1e-12)               
+    denom = np.maximum(ideal_w, 1e-12)
     diff = np.abs(fold_w - ideal_w) / denom
-    mul = np.array([N_CLASSES*3] + [1]*N_CLASSES)      
+    mul = np.array([N_CLASSES*3] + [1]*N_CLASSES)
     return float(np.dot(mul, diff))
+
 
 def global_score(fw_list):
     # MINIMAX over folds instead of sum/mean
     return max(discrepancy_metric(fw, ideal_fold_weights) for fw in fw_list)
 
-# init
-fold_weights = [np.zeros(N_CLASSES + 1, dtype=float) for _ in range(N_SPLITS)]
-component_fold = [-1] * len(subsampled_components)
-
-# optional: seed the heaviest N_SPLITS components one-per-fold
-order = np.argsort(-components_weights[:, 0])
-for j in range(min(N_SPLITS, len(order))):
-    i = int(order[j])
-    component_fold[i] = j
-    fold_weights[j]  += components_weights[i]
-
-# greedy with MINIMAX objective
-for pos in range(N_SPLITS, len(order)):
-    i = int(order[pos])
-
-    # current worst-fold score
-    base = global_score(fold_weights)
-
-    # try placing component i into each fold
-    candidates = []
-    for k in range(N_SPLITS):
-        fold_weights[k] += components_weights[i]
-        sc = global_score(fold_weights)
-        candidates.append((sc, k))
-        fold_weights[k] -= components_weights[i]
-
-    # pick placement that minimizes the worst-fold score
-    best_sc, best_k = min(candidates, key=lambda x: x[0])
-
-    # tie-breaker: among ties, pick the fold with the smallest current total
-    ties = [k for sc,k in candidates if np.isclose(sc, best_sc)]
-    if len(ties) > 1:
-        best_k = min(ties, key=lambda k: fold_weights[k][0])
-
-    component_fold[i] = best_k
-    fold_weights[best_k] += components_weights[i]
-
-# ----------------- ONE-PASS LOCAL REFINEMENT (move-1) -----------------
-EPS = 1e-12
 
 def local_refine_full_1opt(components_weights, fold_weights, component_fold, n_splits, max_iters=100):
+    EPS = 1e-12
     n_comp = components_weights.shape[0]
     improved_any = False
     for _ in range(max_iters):
@@ -495,22 +170,24 @@ def local_refine_full_1opt(components_weights, fold_weights, component_fold, n_s
         improved_any = True
     return improved_any
 
+
 def local_refine_swaps_2opt(components_weights, fold_weights, component_fold, n_splits, max_pairs_per_fold=50):
+    EPS = 1e-12
     base = global_score(fold_weights)
     best_gain, best_swap = 0.0, None
     comp_in_fold = [np.where(np.array(component_fold) == f)[0] for f in range(n_splits)]
     small_in_fold = []
     for f in range(n_splits):
         idx = comp_in_fold[f]
-        if idx.size == 0: 
-            small_in_fold.append(idx); 
+        if idx.size == 0:
+            small_in_fold.append(idx);
             continue
         order = idx[np.argsort(components_weights[idx, 0])]
         small_in_fold.append(order[:max_pairs_per_fold])
     for a in range(n_splits):
         for b in range(a+1, n_splits):
             A, B = small_in_fold[a], small_in_fold[b]
-            if A.size == 0 or B.size == 0: 
+            if A.size == 0 or B.size == 0:
                 continue
             for i in A:
                 for j in B:
@@ -537,17 +214,6 @@ def local_refine_swaps_2opt(components_weights, fold_weights, component_fold, n_
     component_fold[j] = a
     return True
 
-# iterate until no improvement
-# changed = True
-# iters = 0
-# while changed and iters < 100:
-#     changed = False
-#     if local_refine_full_1opt(components_weights, fold_weights, component_fold, N_SPLITS, max_iters=3):
-#         changed = True
-#     if local_refine_swaps_2opt(components_weights, fold_weights, component_fold, N_SPLITS, max_pairs_per_fold=80):
-#         changed = True
-#     iters += 1
-# print(f"[refine] passes: {iters}")
 
 def refine_double_relocate(components_weights, fold_weights, component_fold, n_splits,
                            max_iters=10, max_src_small=80, max_src_large=10, max_targets=3, eps=1e-12):
@@ -608,126 +274,11 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
 
     return improved_any
 
-# improved = True
-# iterations = 0
-# while improved and iterations < 30:
-#     improved = refine_double_relocate(components_weights, fold_weights, component_fold, N_SPLITS,
-#                            max_iters=8, max_src_small=100, max_src_large=12, max_targets=3)
-#     iterations += 1
-# print(f"Improved {iterations} times")
-
-
-# sanity check
-assert np.allclose(np.sum(fold_weights, axis=0), dataset_weights), "Fold weights don't sum to dataset!"
-
-
-
-split_sets = [set() for _ in range(N_SPLITS)]
-for comp_idx, comp in enumerate(subsampled_components):
-    split_sets[component_fold[comp_idx]].update(comp)
-
-set_mapping = {}
-for i, s in enumerate(split_sets,1):
-    for cid in s:
-        set_mapping[cid] = f"split{i}"
-
-
-# create PrettyTable here to pring the weights
-table = PrettyTable()
-table.field_names = ["Split", "Total weight", "Class 0", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Other"]
-for f_idx, f_weight in enumerate(fold_weights):
-    table.add_row([f_idx + 1] + list(f_weight))
-print("Folds weights")
-print(table)
-
-# split sequences
-split_data = [{} for _ in range(N_SPLITS)]
-for i in range(1,101):
-    fn = os.path.join(pkl_folder_path, f"batch{i}_annotations.pkl")
-    if not os.path.isfile(fn): continue
-    batch = parse_batch_file(fn)
-    for chain_id, ann in batch.items():
-        if chain_id in no_positive_seqids:
-            continue
-        seq_id = chain_id.rsplit('_', 1)[0]
-        st = set_mapping.get(seq_id)
-        if st is None: continue
-        idx = int(st.replace("split",""))-1
-        split_data[idx][chain_id] = ann
-
-all_txt = {}
-for d in split_data:
-    all_txt.update(d)
-
-# build dataframe
-component_mapping = {
-    cid: comp_idx+1
-    for comp_idx, comp in enumerate(subsampled_components)
-    for cid in comp
-}
-
-final_data = []
-for chain_id, ann in all_txt.items():
-    prefix = chain_id.split('_')[0]
-    uniprot = pdb_to_uniprot.get(prefix, prefix)
-    if uniprot not in protein_data:
-        print(f"Warning: no record for {chain_id}")
-        continue
-    rec = protein_data[uniprot]
-    final_data.append({
-        "Sequence_ID": chain_id,
-        "Cluster_1":   rec.get("Cluster_1"),
-        "Cluster_2":   rec.get("Cluster_2"),
-        "Set_Type":    set_mapping.get(prefix),
-        "EC_number":   rec.get("EC_number"),
-        "Component_ID": component_mapping.get(prefix),
-        "full_name":   rec.get("full_name")
-    })
-
-print(f"Found {len(all_txt)} relevant chains")
-print(f"DataFrame size is {len(final_data)}")
-
-final_df = pd.DataFrame(final_data)
-
-# --- helpers ---
-max_W_c2 = 100.0
 
 def get_parent(cid):
     return pdb_to_uniprot.get(cid.split('_')[0], cid.split('_')[0])
 
-final_df['Parent_ID'] = final_df['Sequence_ID'].map(get_parent)
-struct_counts = final_df.groupby('Parent_ID')['Sequence_ID'].nunique()
 
-c2_count = final_df.groupby('Cluster_2')['Cluster_1'].nunique()
-final_df['c2_n_cl1']  = final_df['Cluster_2'].map(c2_count).astype(float)
-final_df['c2_capped'] = final_df['c2_n_cl1'].clip(upper=max_W_c2)
-
-# W_Cluster_2 = min(max_W_c2, #Cluster_1 in Cluster_2)
-final_df['W_Cluster_2'] = final_df['c2_capped']
-
-# W_Cluster_1 = W_Cluster_2 / (#Cluster_1 in Cluster_2) = min(1, max_W_c2 / #Cluster_1_in_C2))
-final_df['W_Cluster_1'] = (final_df['c2_capped'] / final_df['c2_n_cl1'])
-
-# #UniProt in Cluster_1
-c1_parent_count = final_df.groupby('Cluster_1')['Parent_ID'].nunique()
-final_df['c1_n_parents'] = final_df['Cluster_1'].map(c1_parent_count).astype(float)
-
-# W_Sequence = W_Cluster_1 / (#UniProt in Cluster_1)
-final_df['W_Sequence'] = (final_df['W_Cluster_1'] / final_df['c1_n_parents'])
-
-# W_Structure = W_Sequence / (#structures for UniProt)
-final_df['structures_for_parent'] = final_df['Parent_ID'].map(struct_counts).astype(float)
-final_df['W_Structure'] = final_df['W_Sequence'] / final_df['structures_for_parent']
-
-final_df[['W_Cluster_1','W_Cluster_2','W_Sequence','W_Structure']] = \
-    final_df[['W_Cluster_1','W_Cluster_2','W_Sequence','W_Structure']].fillna(1.0)
-
-final_df.drop(columns=['Parent_ID','c2_n_cl1','c2_capped','c1_n_parents','structures_for_parent'],
-              inplace=True)
-final_df.to_csv(final_dataset_path, index=False)
-
-
-# save annotations
 def save_annotations(data, out_fn):
     with open(out_fn, 'w') as f:
         for cid, ann in data.items():
@@ -735,7 +286,492 @@ def save_annotations(data, out_fn):
             for entry in ann:
                 f.write(f"{entry}\n")
 
-for i, d in enumerate(split_data,1):
-    save_annotations(d, os.path.join(output_dir, f"split{i}.txt"))
 
-print("Datasets have been split into 5 folds and files saved.")
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    global PDB_DIR, protein_data, pdb_counter, chains_by_prefix, sequences_dict, labels_dict
+    global N_CLASSES, N_SPLITS, ideal_fold_weights
+
+    ap = argparse.ArgumentParser(description="Build 5-fold stratified CV splits balanced by chemical class.")
+    ap.add_argument("--cluster_level_1", required=True, help="Path to cluster_level_1_cluster.tsv (see config.example.yaml)")
+    ap.add_argument("--cluster_level_2", required=True, help="Path to cluster_level_2_cluster.tsv (see config.example.yaml)")
+    ap.add_argument("--protein_table", required=True, help="EC-filtered protein table JSON (see config.example.yaml: protein_table_modified)")
+    ap.add_argument("--batches_dir", required=True, help="Directory with batch*_annotations.pkl (see config.example.yaml: batches_dir)")
+    ap.add_argument("--pdb_dir", required=True, help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
+    ap.add_argument("--output_dir", required=True, help="Output directory for CV splits (see config.example.yaml: cv_dir)")
+    args = ap.parse_args()
+
+    random.seed(42)
+    np.random.seed(42)
+
+    n_procs = min(128, cpu_count())
+
+    PDB_DIR = args.pdb_dir
+
+    cluster_level_1_path = args.cluster_level_1
+    cluster_level_2_path = args.cluster_level_2
+    protein_table_path   = args.protein_table
+    pkl_folder_path      = args.batches_dir
+    output_dir           = args.output_dir
+    final_dataset_path   = os.path.join(output_dir, "dataset.csv")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    cluster_level_1 = pd.read_csv(cluster_level_1_path, sep='\t', header=None,
+                                  names=['Cluster_1', 'Sequence_ID'])
+    cluster_level_2 = pd.read_csv(cluster_level_2_path, sep='\t', header=None,
+                                  names=['Cluster_2', 'Centroid_ID'])
+    with open(protein_table_path) as f:
+        protein_data = json.load(f)
+
+    pdb_counter = Counter()
+    for rec in protein_data.values():
+        pdb_counter.update(rec.get("pdb_ids", []))
+
+    for key, value in pdb_counter.items():
+        if value > 1:
+            print(f"PDB {key} occurs {value} times")
+
+    pdb_to_uniprot = {}
+    cluster_1_to_seqs = defaultdict(list)
+    structures_cnt = {}
+
+    tasks = [
+        (cl1, uid)
+        for cl1, grp in cluster_level_1.groupby("Cluster_1")
+        for uid in grp["Sequence_ID"]
+    ]
+
+    with Pool(n_procs) as pool:
+        results = pool.map(_process_seq, tasks)
+
+    for item in results:
+        if item is None:
+            continue
+        cl1, uid, cnt, valid_pdbs = item
+        cluster_1_to_seqs[cl1].append(uid)
+        structures_cnt[uid] = cnt
+        for pdb in valid_pdbs:
+            cluster_1_to_seqs[cl1].append(pdb)
+            pdb_to_uniprot[pdb] = uid
+
+
+
+    for cl1 in cluster_1_to_seqs:
+        cluster_1_to_seqs[cl1] = list(set(cluster_1_to_seqs[cl1]))
+
+
+    seq_to_c1 = {}
+    for cl1, seqs in cluster_1_to_seqs.items():
+        for seq in seqs:
+            seq_to_c1[seq] = cl1
+
+    centroid_to_c2 = {r['Centroid_ID']: r['Cluster_2'] for _, r in cluster_level_2.iterrows()}
+    cluster_2_to_1 = defaultdict(list)
+    for cl1, seqs in cluster_1_to_seqs.items():
+        c2 = centroid_to_c2.get(cl1)
+        if c2:
+            cluster_2_to_1[c2].append(cl1)
+
+    cluster_1_to_2 = {}
+    for c2, cls in cluster_2_to_1.items():
+        for cl1 in cls:
+            cluster_1_to_2[cl1] = c2
+
+    for cl1, seqs in cluster_1_to_seqs.items():
+        for uid in seqs:
+            if uid in protein_data:
+                protein_data[uid].update({
+                    "Cluster_1": cl1,
+                    "Cluster_2": cluster_1_to_2.get(cl1)
+                })
+
+    # ==== map every node (UniProt and PDB) to its Cluster_2 ====
+    seq_to_c2 = {}
+    for cl1, seqs in cluster_1_to_seqs.items():
+        c2 = cluster_1_to_2.get(cl1)
+        if c2 is None:
+            print(f"Warning: cluster1={cl1} has no Cluster_2")
+            continue
+        for seq in seqs:
+            seq_to_c2[seq] = c2
+
+    # sanity check
+    missing = [n for cl in cluster_1_to_seqs.values() for n in cl if n not in seq_to_c2]
+    if missing:
+        print("Nodes without seq_to_c2 mapping:", missing)
+
+
+    # create a graph
+    valid_nodes = set(seq_to_c2.keys())
+
+    G = nx.Graph()
+    G.add_nodes_from(valid_nodes)
+
+    for pdb, uni in pdb_to_uniprot.items():
+        if pdb in valid_nodes and uni in valid_nodes:
+            G.add_edge(uni, pdb)
+
+    # edges by Cluster_2 over ALL seq_to_c2 nodes (UniProt + PDB)
+    by_c2 = defaultdict(list)
+    for seq, c2 in seq_to_c2.items():
+        by_c2[c2].append(seq)
+    for seqs in by_c2.values():
+        if len(seqs) > 1:
+            G.add_edges_from(combinations(seqs, 2))
+
+    # edges by EC
+    uids = list(protein_data.keys())
+    ecs  = []
+    for uid in uids:
+        ec = protein_data[uid].get("EC_number", "not found")
+        if valid_ec_number(ec):
+            ec = '.'.join(ec.split('.')[:3])
+        else:
+            ec = "not found"
+        ecs.append(ec)
+
+    ec_map = defaultdict(list)
+    for uid, ec in zip(uids, ecs):
+        if ec != "not found":
+            ec_map[ec].append(uid)
+
+    for ec, uids in ec_map.items():
+        filt = [u for u in uids if u in valid_nodes]
+        if len(filt) > 1:
+            G.add_edges_from(combinations(filt, 2))
+
+    components = list(nx.connected_components(G))
+
+    # print EC numbers for each component
+    for i, comp in enumerate(components, 1):
+        ecs = {trunc(protein_data[n].get("EC_number","not found")) for n in comp if n in protein_data}
+        tag = "single" if len(ecs)==1 else f"multiple {ecs}"
+        print(f"Component {i}: {tag}, size={len(comp)}")
+
+    # round-robin to subsample big components
+    max_comp_size = 3000
+    subsampled_components = []
+    for comp in components:
+        if len(comp) <= max_comp_size:
+            subsampled_components.append(list(comp))
+        else:
+            by_c2 = defaultdict(list)
+            for uid in comp:
+                by_c2[seq_to_c2.get(uid)].append(uid)
+            for lst in by_c2.values():
+                random.shuffle(lst)
+            keys = list(by_c2)
+            idxs = {k:0 for k in keys}
+            sel = []
+            while len(sel) < max_comp_size:
+                for k in keys:
+                    if idxs[k] < len(by_c2[k]):
+                        sel.append(by_c2[k][idxs[k]])
+                        idxs[k] += 1
+                    if len(sel) >= max_comp_size:
+                        break
+            subsampled_components.append(sel)
+
+    # parse annotations to get labels and amino acids
+    batch_files = glob(os.path.join(pkl_folder_path, "batch*_annotations.pkl"))
+
+    with Pool(n_procs) as pool:
+        all_batches = pool.map(_parse_batch_file, batch_files)
+
+    sequences_dict = {}
+    labels_dict   = {}
+    no_positive_seqids = set()
+    for batch in all_batches:
+        for chain_id, ann in batch.items():
+            seq  = []
+            labs = []
+            for line in ann:
+                aa, lab = line.strip().split()[2], int(line.strip().split()[3])
+                seq.append(aa); labs.append(lab)
+            if sum(labs)==0:
+                no_positive_seqids.add(chain_id)
+            sequences_dict[chain_id] = "".join(seq)
+            labels_dict  [chain_id] = labs
+
+
+    # collect only catalytic residues
+    # Build mapping chain_id -> prefix (UniProt / PDB ID)
+    all_chains = set(sequences_dict.keys())
+    chains_by_prefix = defaultdict(list)
+    for chain in all_chains:
+        prefix = chain.rsplit('_', 1)[0]
+        chains_by_prefix[prefix].append(chain)
+
+    annotated_prefixes = set(chains_by_prefix.keys())
+    print(f"Annotated sequences: {annotated_prefixes}")
+
+    filtered_components = []
+    for comp in subsampled_components:
+        good = [seq_id for seq_id in comp if seq_id in annotated_prefixes]
+        missing = set(comp) - set(good)
+        if missing:
+            print(f"Deleted seq_id without annotations: {missing}")
+        if good:
+            filtered_components.append(good)
+
+    subsampled_components = filtered_components
+
+    # main
+    seq_ids = [seq for comp in subsampled_components for seq in comp]
+    with Pool(n_procs) as pool:
+        items = pool.map(_compute_residues_for_seq, seq_ids)
+    catalytic_residue_dict = dict(items)
+
+    # assign class based on chemical properties of catalutic sites
+    N_CLASSES = 8
+
+    c1_counts = {}
+    for cl1, seqs in cluster_1_to_seqs.items():
+        uni_seqs = [uid for uid in seqs if uid in protein_data]
+        c1_counts[cl1] = len(uni_seqs)
+
+    c2_counts = {c2: len(c1s) for c2, c1s in cluster_2_to_1.items()}
+
+    missing = {nid
+               for comp in subsampled_components
+               for nid in comp
+               if nid not in seq_to_c2}
+    print("Nodes without seq_to_c2 mapping:", missing)
+
+    for pdb in missing:
+        uid = pdb_to_uniprot.get(pdb)
+        c1  = seq_to_c1.get(uid)
+        c2  = centroid_to_c2.get(c1)
+        print(f"PDB {pdb} ← UniProt {uid}, Cluster_1={c1}, Cluster_2={c2}")
+
+
+
+    # 1) Capped W_Cluster_2
+    max_W_c2 = 100.0
+    W_c2_by_c2 = {c2: min(max_W_c2, float(cnt)) for c2, cnt in c2_counts.items()}
+
+    # 2) per-seq W_Cluster_2 and W_Cluster_1
+    W_c2 = {}
+    W_c1 = {}
+    for comp in subsampled_components:
+        for seq in comp:
+            c2 = seq_to_c2.get(seq)
+            c2_size = float(c2_counts.get(c2, 1))
+            w_c2 = W_c2_by_c2.get(c2, 1.0)           # min(max_W_c2, c2_size)
+            W_c2[seq] = w_c2
+            # W_Cluster_1 = W_c2 / (#Cluster_1 in this Cluster_2) = min(1, max_W_c2 / c2_size)
+            W_c1[seq] = w_c2 / c2_size
+
+    # 3) W_Sequence = W_Cluster_1 / (#UniProt in Cluster_1)
+    W_sequence = {}
+    for comp in subsampled_components:
+        for seq in comp:
+            c1 = seq_to_c1[seq]
+            n_uniprot = float(c1_counts.get(c1, 1))
+            W_sequence[seq] = W_c1[seq] / n_uniprot
+
+    # 4) W_Structure = W_Sequence / (#structures for UniProt)
+    W_structure = {}
+    for comp in subsampled_components:
+        for seq in comp:
+            parent = pdb_to_uniprot.get(seq, seq)
+            n_struct = float(structures_cnt.get(parent, 1))
+            W_structure[seq] = W_sequence[seq] / n_struct
+
+    # split into folds
+    N_SPLITS = 5
+
+    components_weights = np.zeros((len(subsampled_components), N_CLASSES + 1), dtype=float)
+    for i, comp in enumerate(subsampled_components):
+        # total
+        components_weights[i, 0] = sum(W_structure[s] for s in comp)
+        # classes:
+        for s in comp:
+            cl = get_catalytic_class(catalytic_residue_dict[s])  # 0..N_CLASSES-1
+            components_weights[i, cl + 1] += W_structure[s]
+
+    dataset_weights = components_weights.sum(axis=0)           # shape: (N_CLASSES+1,)
+    ideal_fold_weights = dataset_weights / N_SPLITS            # N_SPLITS=5
+    print(f"Ideal weights: {list(ideal_fold_weights)}")
+    print()
+
+    # init
+    fold_weights = [np.zeros(N_CLASSES + 1, dtype=float) for _ in range(N_SPLITS)]
+    component_fold = [-1] * len(subsampled_components)
+
+    # optional: seed the heaviest N_SPLITS components one-per-fold
+    order = np.argsort(-components_weights[:, 0])
+    for j in range(min(N_SPLITS, len(order))):
+        i = int(order[j])
+        component_fold[i] = j
+        fold_weights[j]  += components_weights[i]
+
+    # greedy with MINIMAX objective
+    for pos in range(N_SPLITS, len(order)):
+        i = int(order[pos])
+
+        # current worst-fold score
+        base = global_score(fold_weights)
+
+        # try placing component i into each fold
+        candidates = []
+        for k in range(N_SPLITS):
+            fold_weights[k] += components_weights[i]
+            sc = global_score(fold_weights)
+            candidates.append((sc, k))
+            fold_weights[k] -= components_weights[i]
+
+        # pick placement that minimizes the worst-fold score
+        best_sc, best_k = min(candidates, key=lambda x: x[0])
+
+        # tie-breaker: among ties, pick the fold with the smallest current total
+        ties = [k for sc,k in candidates if np.isclose(sc, best_sc)]
+        if len(ties) > 1:
+            best_k = min(ties, key=lambda k: fold_weights[k][0])
+
+        component_fold[i] = best_k
+        fold_weights[best_k] += components_weights[i]
+
+    # ----------------- ONE-PASS LOCAL REFINEMENT (move-1) -----------------
+
+    # iterate until no improvement
+    # changed = True
+    # iters = 0
+    # while changed and iters < 100:
+    #     changed = False
+    #     if local_refine_full_1opt(components_weights, fold_weights, component_fold, N_SPLITS, max_iters=3):
+    #         changed = True
+    #     if local_refine_swaps_2opt(components_weights, fold_weights, component_fold, N_SPLITS, max_pairs_per_fold=80):
+    #         changed = True
+    #     iters += 1
+    # print(f"[refine] passes: {iters}")
+
+    # improved = True
+    # iterations = 0
+    # while improved and iterations < 30:
+    #     improved = refine_double_relocate(components_weights, fold_weights, component_fold, N_SPLITS,
+    #                            max_iters=8, max_src_small=100, max_src_large=12, max_targets=3)
+    #     iterations += 1
+    # print(f"Improved {iterations} times")
+
+
+    # sanity check
+    assert np.allclose(np.sum(fold_weights, axis=0), dataset_weights), "Fold weights don't sum to dataset!"
+
+
+
+    split_sets = [set() for _ in range(N_SPLITS)]
+    for comp_idx, comp in enumerate(subsampled_components):
+        split_sets[component_fold[comp_idx]].update(comp)
+
+    set_mapping = {}
+    for i, s in enumerate(split_sets,1):
+        for cid in s:
+            set_mapping[cid] = f"split{i}"
+
+
+    # create PrettyTable here to pring the weights
+    table = PrettyTable()
+    table.field_names = ["Split", "Total weight", "Class 0", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Other"]
+    for f_idx, f_weight in enumerate(fold_weights):
+        table.add_row([f_idx + 1] + list(f_weight))
+    print("Folds weights")
+    print(table)
+
+    # split sequences
+    split_data = [{} for _ in range(N_SPLITS)]
+    for i in range(1,101):
+        fn = os.path.join(pkl_folder_path, f"batch{i}_annotations.pkl")
+        if not os.path.isfile(fn): continue
+        batch = parse_batch_file(fn)
+        for chain_id, ann in batch.items():
+            if chain_id in no_positive_seqids:
+                continue
+            seq_id = chain_id.rsplit('_', 1)[0]
+            st = set_mapping.get(seq_id)
+            if st is None: continue
+            idx = int(st.replace("split",""))-1
+            split_data[idx][chain_id] = ann
+
+    all_txt = {}
+    for d in split_data:
+        all_txt.update(d)
+
+    # build dataframe
+    component_mapping = {
+        cid: comp_idx+1
+        for comp_idx, comp in enumerate(subsampled_components)
+        for cid in comp
+    }
+
+    final_data = []
+    for chain_id, ann in all_txt.items():
+        prefix = chain_id.split('_')[0]
+        uniprot = pdb_to_uniprot.get(prefix, prefix)
+        if uniprot not in protein_data:
+            print(f"Warning: no record for {chain_id}")
+            continue
+        rec = protein_data[uniprot]
+        final_data.append({
+            "Sequence_ID": chain_id,
+            "Cluster_1":   rec.get("Cluster_1"),
+            "Cluster_2":   rec.get("Cluster_2"),
+            "Set_Type":    set_mapping.get(prefix),
+            "EC_number":   rec.get("EC_number"),
+            "Component_ID": component_mapping.get(prefix),
+            "full_name":   rec.get("full_name")
+        })
+
+    print(f"Found {len(all_txt)} relevant chains")
+    print(f"DataFrame size is {len(final_data)}")
+
+    final_df = pd.DataFrame(final_data)
+
+    # --- helpers ---
+    max_W_c2 = 100.0
+
+    final_df['Parent_ID'] = final_df['Sequence_ID'].map(get_parent)
+    struct_counts = final_df.groupby('Parent_ID')['Sequence_ID'].nunique()
+
+    c2_count = final_df.groupby('Cluster_2')['Cluster_1'].nunique()
+    final_df['c2_n_cl1']  = final_df['Cluster_2'].map(c2_count).astype(float)
+    final_df['c2_capped'] = final_df['c2_n_cl1'].clip(upper=max_W_c2)
+
+    # W_Cluster_2 = min(max_W_c2, #Cluster_1 in Cluster_2)
+    final_df['W_Cluster_2'] = final_df['c2_capped']
+
+    # W_Cluster_1 = W_Cluster_2 / (#Cluster_1 in Cluster_2) = min(1, max_W_c2 / #Cluster_1_in_C2))
+    final_df['W_Cluster_1'] = (final_df['c2_capped'] / final_df['c2_n_cl1'])
+
+    # #UniProt in Cluster_1
+    c1_parent_count = final_df.groupby('Cluster_1')['Parent_ID'].nunique()
+    final_df['c1_n_parents'] = final_df['Cluster_1'].map(c1_parent_count).astype(float)
+
+    # W_Sequence = W_Cluster_1 / (#UniProt in Cluster_1)
+    final_df['W_Sequence'] = (final_df['W_Cluster_1'] / final_df['c1_n_parents'])
+
+    # W_Structure = W_Sequence / (#structures for UniProt)
+    final_df['structures_for_parent'] = final_df['Parent_ID'].map(struct_counts).astype(float)
+    final_df['W_Structure'] = final_df['W_Sequence'] / final_df['structures_for_parent']
+
+    final_df[['W_Cluster_1','W_Cluster_2','W_Sequence','W_Structure']] = \
+        final_df[['W_Cluster_1','W_Cluster_2','W_Sequence','W_Structure']].fillna(1.0)
+
+    final_df.drop(columns=['Parent_ID','c2_n_cl1','c2_capped','c1_n_parents','structures_for_parent'],
+                  inplace=True)
+    final_df.to_csv(final_dataset_path, index=False)
+
+
+    # save annotations
+    for i, d in enumerate(split_data,1):
+        save_annotations(d, os.path.join(output_dir, f"split{i}.txt"))
+
+    print("Datasets have been split into 5 folds and files saved.")
+
+
+if __name__ == "__main__":
+    main()
