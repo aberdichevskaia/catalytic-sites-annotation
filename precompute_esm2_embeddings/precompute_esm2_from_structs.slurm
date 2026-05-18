@@ -15,18 +15,20 @@
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 conda activate scannet_esm2_py311
 
-layers=(30) #16 18 24 30
-struct_dir="/home/iscb/wolfson/jeromet/AFDB/Human_v2"       # "/home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms" 
+esm2_model="3B"   # 8M | 35M | 150M | 650M | 3B | 15B
+layers=(36)         # default layer for 150M; for 3B use 36, for 15B use 48
+struct_dir="/home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms"  #"/home/iscb/wolfson/jeromet/AFDB/Human_v2"
 
 for layer in "${layers[@]}"
 do
-  out_dir="/home/iscb/wolfson/annab4/Data/Human_ESM2_150M_layer${layer}"  # "/home/iscb/wolfson/annab4/Data/Human_Isoforms_ESM2_150M_layer${layer}"
+  out_dir="/home/iscb/wolfson/annab4/Data/Human_Isoforms_ESM2_${esm2_model}_layer${layer}"
 
   python /home/iscb/wolfson/annab4/catalytic-sites-annotation/precompute_esm2_embeddings/precompute_esm2_from_structs.py \
     --struct_dir "${struct_dir}" \
-    --out_dir "${out_dir}" \
-    --layer ${layer} \
-    --device cuda \
+    --out_dir    "${out_dir}" \
+    --esm2_model "${esm2_model}" \
+    --layer      ${layer} \
+    --device     cuda \
     --origin_mode auto \
     --skip_existing
 done

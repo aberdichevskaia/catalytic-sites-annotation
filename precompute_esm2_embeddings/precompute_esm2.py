@@ -7,9 +7,25 @@ import sys
 import csv
 import argparse
 import hashlib
+import logging
 from typing import List, Tuple, Dict
 
 import numpy as np
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+ESM2_MODELS = {
+    "8M":   "esm2_t6_8M_UR50D",
+    "35M":  "esm2_t12_35M_UR50D",
+    "150M": "esm2_t30_150M_UR50D",
+    "650M": "esm2_t33_650M_UR50D",
+    "3B":   "esm2_t36_3B_UR50D",
+    "15B":  "esm2_t48_15B_UR50D",
+}
+
+ESM2_DEFAULT_LAYER = {
+    "8M": 6, "35M": 12, "150M": 30, "650M": 33, "3B": 36, "15B": 48,
+}
 
 
 AA20 = set("ACDEFGHIKLMNPQRSTVWY")
@@ -114,15 +130,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--splits_dir", required=True, help="Directory with split*.txt files")
     ap.add_argument("--out_dir", required=True, help="Output directory for .npy embeddings")
+    ap.add_argument("--esm2_model", default="150M", choices=list(ESM2_MODELS),
+                    help="ESM2 model size (default: 150M)")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"], help="Device for ESM2")
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32"], help="Save dtype")
-    ap.add_argument("--layer", type=int, default=30, help="ESM2 layer (t30 -> 30)")
+    ap.add_argument("--layer", type=int, default=None,
+                    help="ESM2 repr layer index (default: last layer of the chosen model)")
     ap.add_argument("--max_tokens", type=int, default=8000, help="Max tokens per batch (sum of (L+2))")
     ap.add_argument("--max_batch_size", type=int, default=16, help="Max sequences per batch")
     ap.add_argument("--skip_existing", action="store_true", help="Skip if output file exists")
     ap.add_argument("--manifest", default=None, help="Optional manifest TSV path")
     ap.add_argument("--qos_log_every", type=int, default=50, help="Print progress every N proteins")
     args = ap.parse_args()
+
+    if args.layer is None:
+        args.layer = ESM2_DEFAULT_LAYER[args.esm2_model]
 
     os.makedirs(args.out_dir, exist_ok=True)
     manifest_path = args.manifest or os.path.join(args.out_dir, "manifest.tsv")
@@ -140,17 +162,19 @@ def main():
             origin_to_seq[origin] = seq
 
     items = sorted(origin_to_seq.items(), key=lambda x: len(x[1]), reverse=True)
-    print(f"Total unique proteins: {len(items)}")
+    logging.info("Total unique proteins: %d", len(items))
 
     # ---- lazy imports for torch + esm ----
     import torch
     import esm
 
     if args.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA requested but not available; falling back to CPU", file=sys.stderr)
+        logging.warning("CUDA requested but not available; falling back to CPU")
         args.device = "cpu"
 
-    model, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+    logging.info("Loading ESM2 %s (layer %d)", args.esm2_model, args.layer)
+    loader = getattr(esm.pretrained, ESM2_MODELS[args.esm2_model])
+    model, alphabet = loader()
     model.eval()
     model = model.to(args.device)
     batch_converter = alphabet.get_batch_converter()
@@ -204,17 +228,16 @@ def main():
                     w.writerow([origin, len(seq), sha1(seq), out_path, "ok", ""])
                     done += 1
                     if done % args.qos_log_every == 0:
-                        print(f"Saved {done}/{len(items)}")
+                        logging.info("Saved %d/%d", done, len(items))
 
             except Exception as e:
-                # Mark all in batch2 as failed
                 for origin, seq in batch2:
                     out_path = esm_cache_path(args.out_dir, origin)
                     w.writerow([origin, len(seq), sha1(seq), out_path, "failed", repr(e)])
-                print(f"[ERROR] batch {bidx}/{len(batches)} failed: {e}", file=sys.stderr)
+                logging.error("batch %d/%d failed: %s", bidx, len(batches), e)
 
-    print(f"Manifest written to: {manifest_path}")
-    print("Done.")
+    logging.info("Manifest written to: %s", manifest_path)
+    logging.info("Done.")
 
 
 if __name__ == "__main__":

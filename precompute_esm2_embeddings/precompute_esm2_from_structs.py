@@ -7,9 +7,25 @@ import glob
 import csv
 import argparse
 import hashlib
+import logging
 from typing import Dict, List, Tuple
 
 import numpy as np
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+ESM2_MODELS = {
+    "8M":   "esm2_t6_8M_UR50D",
+    "35M":  "esm2_t12_35M_UR50D",
+    "150M": "esm2_t30_150M_UR50D",
+    "650M": "esm2_t33_650M_UR50D",
+    "3B":   "esm2_t36_3B_UR50D",
+    "15B":  "esm2_t48_15B_UR50D",
+}
+
+ESM2_DEFAULT_LAYER = {
+    "8M": 6, "35M": 12, "150M": 30, "650M": 33, "3B": 36, "15B": 48,
+}
 
 import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
@@ -142,17 +158,23 @@ def main():
     ap.add_argument("--recursive", action="store_true", help="Recurse into subfolders")
     ap.add_argument("--patterns", nargs="+", default=["*.pdb", "*.cif"], help="Glob patterns to include")
     ap.add_argument("--origin_mode", default="auto", choices=["auto", "file", "file+chain"])
-    ap.add_argument("--model", type=int, default=1, help="Model index for multi-model structures (biotite)")
+    ap.add_argument("--struct_model", type=int, default=1, help="Model index for multi-model structures (biotite)")
     ap.add_argument("--use_author_fields", action="store_true", default=True, help="Use author chain IDs for CIF")
+    ap.add_argument("--esm2_model", default="150M", choices=list(ESM2_MODELS),
+                    help="ESM2 model size (default: 150M)")
     ap.add_argument("--device", default="cuda", choices=["cuda", "cpu"], help="Device for ESM2")
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32"], help="Save dtype")
-    ap.add_argument("--layer", type=int, default=30, help="ESM2 repr layer (t30 -> 30)")
+    ap.add_argument("--layer", type=int, default=None,
+                    help="ESM2 repr layer index (default: last layer of the chosen model)")
     ap.add_argument("--max_tokens", type=int, default=8000, help="Max tokens per batch (sum of (L+2))")
     ap.add_argument("--max_batch_size", type=int, default=16, help="Max sequences per batch")
     ap.add_argument("--skip_existing", action="store_true", help="Skip if output file exists")
     ap.add_argument("--manifest", default=None, help="Optional manifest TSV path")
     ap.add_argument("--qos_log_every", type=int, default=50, help="Print progress every N embeddings")
     args = ap.parse_args()
+
+    if args.layer is None:
+        args.layer = ESM2_DEFAULT_LAYER[args.esm2_model]
 
     os.makedirs(args.out_dir, exist_ok=True)
     manifest_path = args.manifest or os.path.join(args.out_dir, "manifest.tsv")
@@ -178,7 +200,7 @@ def main():
     for fpath in files:
         base = os.path.splitext(os.path.basename(fpath))[0]
         try:
-            atoms = read_structure_atoms(fpath, model=args.model, use_author_fields=args.use_author_fields)
+            atoms = read_structure_atoms(fpath, model=args.struct_model, use_author_fields=args.use_author_fields)
             chain_ids = list_chain_ids(atoms)
             n_ch = len(chain_ids)
 
@@ -198,18 +220,18 @@ def main():
                 origin_meta[origin] = (fpath, ch)
 
         except Exception as e:
-            print(f"[WARN] Failed to parse {fpath}: {e}", file=sys.stderr)
+            logging.warning("Failed to parse %s: %s", fpath, e)
 
     items = sorted(origin_to_seq.items(), key=lambda x: len(x[1]), reverse=True)
-    print(f"Total files: {len(files)}")
-    print(f"Total unique origins: {len(items)}")
+    logging.info("Total files: %d", len(files))
+    logging.info("Total unique origins: %d", len(items))
 
     # ---- ESM2 ----
     import torch
     import esm
 
     if args.device == "cuda" and not torch.cuda.is_available():
-        print("[WARN] CUDA requested but not available; falling back to CPU", file=sys.stderr)
+        logging.warning("CUDA requested but not available; falling back to CPU")
         args.device = "cpu"
 
     save_dtype = np.float16 if args.dtype == "float16" else np.float32
@@ -231,16 +253,16 @@ def main():
                 else:
                     items_to_process.append((origin, seq))
             items = items_to_process
-            print(f"Skip existing: {skipped} already cached, {len(items)} to compute")
+            logging.info("Skip existing: %d already cached, %d to compute", skipped, len(items))
 
         if not items:
-            print("Nothing to compute: all embeddings already exist.")
-            print(f"Manifest written to: {manifest_path}")
-            print("Done.")
+            logging.info("Nothing to compute: all embeddings already exist.")
+            logging.info("Manifest written to: %s", manifest_path)
             return
 
-        # --- load ESM only now ---
-        esm_model, alphabet = esm.pretrained.esm2_t30_150M_UR50D()
+        logging.info("Loading ESM2 %s (layer %d)", args.esm2_model, args.layer)
+        loader = getattr(esm.pretrained, ESM2_MODELS[args.esm2_model])
+        esm_model, alphabet = loader()
         esm_model.eval()
         esm_model = esm_model.to(args.device)
         batch_converter = alphabet.get_batch_converter()
@@ -276,17 +298,17 @@ def main():
 
                     done += 1
                     if done % args.qos_log_every == 0:
-                        print(f"Saved {done}/{total}")
+                        logging.info("Saved %d/%d", done, total)
 
             except Exception as e:
                 for origin, seq in batch:
                     out_path = esm_cache_path(args.out_dir, origin)
                     src, ch = origin_meta.get(origin, ("", ""))
                     w.writerow([origin, len(seq), sha1(seq), out_path, "failed", repr(e), src, ch])
-                print(f"[ERROR] batch {bidx}/{len(batches)} failed: {e}", file=sys.stderr)
+                logging.error("batch %d/%d failed: %s", bidx, len(batches), e)
 
-    print(f"Manifest written to: {manifest_path}")
-    print("Done.")
+    logging.info("Manifest written to: %s", manifest_path)
+    logging.info("Done.")
 
 
 if __name__ == "__main__":
