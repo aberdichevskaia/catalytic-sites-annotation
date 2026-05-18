@@ -31,10 +31,13 @@ os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
 os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
 # -------------------------------------------------------------------------------
 
+import logging
 import sys
 import argparse
 from glob import glob
 from typing import Dict, List, Tuple, Optional
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -147,7 +150,8 @@ def infer_in_chunks(
         n = names[start:start + chunk_size]
         pr = run_cv_catalytic_inference(p, n, use_msa=use_msa, ncores=ncores, msa_dir=msa_dir)
         out.update(pr)
-        print(f"[INFO] {'MSA' if use_msa else 'noMSA'} inferred {min(start+chunk_size, len(paths))}/{len(paths)}", flush=True)
+        logging.info("%s inferred %s/%s", "MSA" if use_msa else "noMSA",
+                     min(start + chunk_size, len(paths)), len(paths))
     return out
 
 
@@ -350,10 +354,10 @@ def main():
     with_msa_set = set(with_msa_ids)
     without_msa_ids = [iso for iso in iso_ids if iso not in with_msa_set]
 
-    print(f"[INFO] total isoforms: {len(iso_ids)}", flush=True)
-    print(f"[INFO] hybrid: MSA for {len(with_msa_ids)}, noMSA for {len(without_msa_ids)}", flush=True)
+    logging.info("total isoforms: %s", len(iso_ids))
+    logging.info("hybrid: MSA for %s, noMSA for %s", len(with_msa_ids), len(without_msa_ids))
     if msa_dir and without_msa_ids:
-        print("[DEBUG] examples noMSA (first 10): " + ", ".join(without_msa_ids[:10]), flush=True)
+        logging.debug("examples noMSA (first 10): %s", ", ".join(without_msa_ids[:10]))
 
     # Inference
     probs_raw: Dict[str, np.ndarray] = {}
@@ -397,7 +401,7 @@ def main():
         try:
             seqs[iso] = load_isoform_sequence_from_pdb_path(path)
         except Exception as exc:
-            print(f"[WARN] failed to load sequence for {iso}: {exc}", flush=True)
+            logging.warning("failed to load sequence for %s: %s", iso, exc)
 
     # Group by base_id (only isoforms with both seq and probs)
     base_to_isos: Dict[str, List[str]] = {}
@@ -417,14 +421,14 @@ def main():
         try:
             score = compute_group_score(isos, g_seqs, g_probs)
         except Exception as exc:
-            print(f"[WARN] base_id={base_id}: failed to compute score ({exc})", flush=True)
+            logging.warning("base_id=%s: failed to compute score (%s)", base_id, exc)
             continue
         out_rows.append({"base id": base_id, "score": score})
 
     df = pd.DataFrame(out_rows, columns=["base id", "score"])
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     df.to_csv(args.out_csv, index=False)
-    print(f"[OK] wrote {len(df)} base IDs -> {args.out_csv}", flush=True)
+    logging.info("wrote %s base IDs -> %s", len(df), args.out_csv)
 
 
 if __name__ == "__main__":

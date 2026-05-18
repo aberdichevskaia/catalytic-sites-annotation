@@ -1,8 +1,11 @@
 import os
 import json
 import csv
+import logging
 from collections import defaultdict
 from multiprocessing import Pool, cpu_count
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 
@@ -55,7 +58,7 @@ def load_structure_weights(csv_path):
     """Read dataset.csv and return {Sequence_ID: float(W_Structure)}."""
     weights = {}
     if not os.path.isfile(csv_path):
-        print(f"[WARN] dataset.csv not found at {csv_path} -> default weight=1.0")
+        logging.warning("dataset.csv not found at %s -> default weight=1.0", csv_path)
         return weights
 
     with open(csv_path, "r", newline="") as f:
@@ -301,7 +304,7 @@ def main():
 
     with open(SAVE_FILE, "w") as f:
         json.dump(all_splits, f)
-    print(f"[OK] saved -> {SAVE_FILE}")
+    logging.info("saved -> %s", SAVE_FILE)
 
 
 if __name__ == "__main__":

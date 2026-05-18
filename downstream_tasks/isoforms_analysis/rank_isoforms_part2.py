@@ -19,7 +19,10 @@ Output CSV: columns [base id, score]
 
 import os
 import argparse
-from typing import Dict, List, Tuple, Optional
+import logging
+from typing import Dict, List, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -275,7 +278,7 @@ def run_stage(
     ISO_TO_IDX = {iso: i for i, iso in enumerate(ISOFORM_IDS)}
 
     # Load sequences once in parent (fast enough) -> fork shares memory (copy-on-write)
-    print(f"[INFO] loading sequences from PDBs for {len(ISOFORM_IDS)} isoforms...", flush=True)
+    logging.info("loading sequences from PDBs for %s isoforms...", len(ISOFORM_IDS))
     SEQ_MAP = {}
     bad = 0
     for iso, pdb_path in zip(ISOFORM_IDS, PDB_PATHS):
@@ -284,10 +287,10 @@ def run_stage(
         except Exception as exc:
             bad += 1
             if bad <= 10:
-                print(f"[WARN] seq load failed for {iso} ({pdb_path}): {exc}", flush=True)
+                logging.warning("seq load failed for %s (%s): %s", iso, pdb_path, exc)
 
     if bad:
-        print(f"[WARN] failed to load sequences for {bad} isoforms (they will be skipped).", flush=True)
+        logging.warning("failed to load sequences for %s isoforms (they will be skipped).", bad)
 
     # Build base_id groups using only isoforms with sequences
     df = pd.DataFrame({"isoform_id": ISOFORM_IDS, "base_id": BASE_IDS})
@@ -299,7 +302,7 @@ def run_stage(
         if len(iso_ids) >= min_isoforms:
             base_groups.append((str(base_id), iso_ids))
 
-    print(f"[INFO] base groups to process: {len(base_groups)}", flush=True)
+    logging.info("base groups to process: %s", len(base_groups))
 
     # Optional: save seq cache
     if seq_cache_csv:
@@ -308,7 +311,7 @@ def run_stage(
         pd.DataFrame(
             {"isoform_id": list(SEQ_MAP.keys()), "seq": list(SEQ_MAP.values())}
         ).to_csv(outp, index=False)
-        print(f"[OK] wrote seq cache -> {outp}", flush=True)
+        logging.info("wrote seq cache -> %s", outp)
 
     # Use fork context to avoid duplicating big arrays in workers
     try:
@@ -324,30 +327,9 @@ def run_stage(
             rows.append({"base id": base_id, "score": score})
 
     out_df = pd.DataFrame(rows).sort_values("score", ascending=False)
-    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
-    out_df.to_csv(out_csv, index=False)
-    print(f"[OK] wrote {len(out_df)} rows -> {out_csv}", flush=True)
-    return out_df
-
-
-def main():
-    ap = argparse.ArgumentParser(description="CPU stage: compute base_id spread scores from one dumped NPZ.")
-    ap.add_argument("--dump_npz", required=True, help="NPZ produced by GPU stage (one file).")
-    ap.add_argument("--out_csv", required=True)
-    ap.add_argument("--nproc", type=int, default=16)
-    ap.add_argument("--min_isoforms", type=int, default=2)
-    ap.add_argument("--maxtasksperchild", type=int, default=50)
-    ap.add_argument("--seq_cache_csv", default=None, help="Optional: save loaded sequences to CSV for reuse/debug.")
-    args = ap.parse_args()
-
-    run_stage(
-        dump_npz=args.dump_npz,
-        out_csv=args.out_csv,
-        nproc=args.nproc,
-        min_isoforms=args.min_isoforms,
-        maxtasksperchild=args.maxtasksperchild,
-        seq_cache_csv=args.seq_cache_csv,
-    )
+    os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
+    out_df.to_csv(args.out_csv, index=False)
+    logging.info("wrote %s rows -> %s", len(out_df), args.out_csv)
 
 
 if __name__ == "__main__":

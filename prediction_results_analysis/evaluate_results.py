@@ -31,8 +31,11 @@ import os
 import json
 import csv
 import argparse
+import logging
 import pickle
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 
@@ -685,7 +688,7 @@ def merge_across_folds(base_dir: str,
         per_sample_src.extend([pkl_path] * len(ids))
         per_sample_model.extend([model_name] * len(ids))
 
-        print(f"[OK] {subset}: fold {fold} -> +{len(ids)} chains")
+        logging.info("%s: fold %s -> +%s chains", subset, fold, len(ids))
 
     merged = {
         "labels": [],
@@ -1106,7 +1109,7 @@ def run_cases_one(results_pkl: str,
             w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()
             w.writerows(rows)
-        print(f"\n[OK] saved CSV -> {out_csv}")
+        logging.info("saved CSV -> %s", out_csv)
 
 
 # =========================
@@ -1135,7 +1138,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
         out_pkl = os.path.join(args.save_dir, f"{subset}.pkl" if subset != "train" else "train_dedup.pkl")
         merged_serializable = dict(merged)
         save_pickle(merged_serializable, out_pkl)
-        print(f"[OK] saved merged -> {out_pkl}")
+        logging.info("saved merged -> %s", out_pkl)
 
         labels = [ensure_1d(x, "labels") for x in merged["labels"]]
         preds = [ensure_1d(x, "preds") for x in merged["predictions"]]
@@ -1244,10 +1247,10 @@ def cmd_merge(args: argparse.Namespace) -> None:
                 w = csv.DictWriter(f, fieldnames=fieldnames)
                 w.writeheader()
                 w.writerows(rows)
-            print(f"[OK] per-chain CSV -> {out_csv}")
+            logging.info("per-chain CSV -> %s", out_csv)
 
     save_json(all_metrics, os.path.join(args.save_dir, "metrics_summary.json"))
-    print(f"[OK] metrics JSON -> {os.path.join(args.save_dir, 'metrics_summary.json')}")
+    logging.info("metrics JSON -> %s", os.path.join(args.save_dir, "metrics_summary.json"))
 
 
 def cmd_seeds(args: argparse.Namespace) -> None:
@@ -1351,7 +1354,8 @@ def cmd_seeds(args: argparse.Namespace) -> None:
                 mp_base_list.append(mp_b)
                 auc_base_list.append(float(auc_b))
 
-            print(f"[OK] subset={subset} version={v}: AUCPR={aucpr:.4f} MP@5={mp_k[4] if len(mp_k)>4 else mp_k[-1]:.4f}")
+            logging.info("subset=%s version=%s: AUCPR=%.4f MP@5=%.4f",
+                         subset, v, aucpr, mp_k[4] if len(mp_k) > 4 else mp_k[-1])
 
         mp_arr = np.stack(mp_list, axis=0)  # (V, K)
         auc_arr = np.asarray(auc_list, dtype=float)
@@ -1464,7 +1468,7 @@ def cmd_seeds(args: argparse.Namespace) -> None:
             })
 
         save_json(summary, os.path.join(args.save_dir, f"{subset}_seed_summary.json"))
-        print(f"[OK] wrote -> {os.path.join(args.save_dir, f'{subset}_seed_summary.json')}")
+        logging.info("wrote -> %s", os.path.join(args.save_dir, f"{subset}_seed_summary.json"))
 
 
 def cmd_cases(args: argparse.Namespace) -> None:

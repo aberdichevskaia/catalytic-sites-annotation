@@ -28,11 +28,14 @@ Usage example:
 
 import os
 import argparse
+import logging
 import numpy as np
 import pandas as pd
 
 import ast
 import re
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import biotite.structure as struc
 from biotite.structure.info import one_letter_code
@@ -227,7 +230,7 @@ def group_has_loss_event(
             try:
                 seq_cache[iso] = load_isoform_sequence(iso, pdb_dir)
             except Exception as exc:
-                print(f"[WARN] base_id={base_id}, isoform={iso}: failed to load sequence ({exc})")
+                logging.warning("base_id=%s, isoform=%s: failed to load sequence (%s)", base_id, iso, exc)
                 return False  # cannot reliably analyse this group
 
     # Alignment cache to avoid recomputing
@@ -256,10 +259,8 @@ def group_has_loss_event(
                 try:
                     align_cache[key] = compute_mapping(seq_from, seq_to)
                 except Exception as exc:
-                    print(
-                        f"[WARN] base_id={base_id}, "
-                        f"align {iso_from} -> {iso_to} failed ({exc})"
-                    )
+                    logging.warning("base_id=%s, align %s -> %s failed (%s)",
+                                    base_id, iso_from, iso_to, exc)
                     return False
 
             mapping = align_cache[key]
@@ -359,10 +360,8 @@ def main():
     df_out = df[df[args.base_col].isin(base_ids_keep)].copy()
     df_out.to_csv(args.out_csv, index=False)
 
-    print(
-        f"[OK] kept {len(df_out)} rows "
-        f"for {len(base_ids_keep)} base IDs -> {args.out_csv}"
-    )
+    logging.info("kept %s rows for %s base IDs -> %s",
+                 len(df_out), len(base_ids_keep), args.out_csv)
 
 
 if __name__ == "__main__":

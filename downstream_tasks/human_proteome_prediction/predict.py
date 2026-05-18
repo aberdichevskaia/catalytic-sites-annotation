@@ -42,6 +42,7 @@ os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
 os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
 # ---------------------------------------------------------------------------
 
+import logging
 import re
 import sys
 import json
@@ -49,6 +50,8 @@ import time
 import argparse
 from glob import glob
 from typing import Dict, List, Tuple, Optional, Any
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -274,7 +277,7 @@ def hits_to_str(probs: np.ndarray, resids: Optional[np.ndarray], thr: float) -> 
 # ----------------------- CLI ---------------------
 def main():
     t0 = time.time()
-    print("[BOOT] starting predict.py", flush=True)
+    logging.info("starting predict.py")
 
     ap = argparse.ArgumentParser(description="Catalytic-site inference over AF Human (cv_catalytic, one meta JSON).")
     ap.add_argument("--structures_dir", required=True,
@@ -299,12 +302,12 @@ def main():
     esm2_dir = ensure_trailing_slash(args.esm2_dir) if args.use_esm2 and args.esm2_dir else None
 
     if args.use_esm2 and not esm2_dir:
-        raise SystemExit("[ERROR] --use_esm2 requires --esm2_dir")
+        raise SystemExit("--use_esm2 requires --esm2_dir")
 
     # 1) Collect structures:
     #    run_name = AF-stem (for predict_bindingsites + MSA/ESM2 lookup)
     #    disp_key = 'ACC_F#' (for CSV/MetaDB)
-    print(f"[STEP] scanning structures under {structures_dir}", flush=True)
+    logging.info("scanning structures under %s", structures_dir)
     cif_paths = glob(os.path.join(structures_dir, "*.cif"))
     pdb_paths = glob(os.path.join(structures_dir, "*.pdb"))
     by_runname: Dict[str, str] = {}     # AF-stem -> path
@@ -322,8 +325,8 @@ def main():
     if not entries_all:
         raise SystemExit(f"No structures in {structures_dir} (*.cif|*.pdb)")
 
-    print(f"[INFO] using {len(entries_all)} structures (prefer .pdb when both exist) "
-          f"in {time.time()-t0:.1f}s", flush=True)
+    logging.info("using %s structures (prefer .pdb when both exist) in %.1fs",
+                 len(entries_all), time.time() - t0)
 
     # 2) Split by mode
     preds_raw: Dict[str, np.ndarray] = {}
@@ -337,11 +340,11 @@ def main():
         with_esm2 = [rn for rn in entries_all if esm_exists_for_origin(esm2_dir, rn)]
         without_esm2 = [rn for rn in entries_all if rn not in set(with_esm2)]
 
-        print(f"[INFO] ESM2 MODE: will use ESM2 for {len(with_esm2)}, "
-              f"fallback noMSA for {len(without_esm2)}.", flush=True)
+        logging.info("ESM2 MODE: will use ESM2 for %s, fallback noMSA for %s.",
+                     len(with_esm2), len(without_esm2))
         if without_esm2:
-            print("[DEBUG] examples without detected ESM2 cache (first 10):",
-                  ", ".join(without_esm2[:10]), flush=True)
+            logging.debug("examples without detected ESM2 cache (first 10): %s",
+                          ", ".join(without_esm2[:10]))
 
         if with_esm2:
             paths = [by_runname[rn] for rn in with_esm2]
@@ -367,11 +370,11 @@ def main():
             with_msa = []
         without_msa = [rn for rn in entries_all if rn not in set(with_msa)]
 
-        print(f"[INFO] STRICT MSA MODE: will NOT build missing MSAs; "
-              f"use_MSA for {len(with_msa)}, noMSA for {len(without_msa)}.", flush=True)
+        logging.info("STRICT MSA MODE: will NOT build missing MSAs; use_MSA for %s, noMSA for %s.",
+                     len(with_msa), len(without_msa))
         if args.use_msa and msa_dir and without_msa:
-            print("[DEBUG] examples without detected MSA (first 10):",
-                  ", ".join(without_msa[:10]), flush=True)
+            logging.debug("examples without detected MSA (first 10): %s",
+                          ", ".join(without_msa[:10]))
 
         if with_msa:
             paths = [by_runname[rn] for rn in with_msa]
@@ -430,7 +433,7 @@ def main():
     df = pd.DataFrame(rows, columns=cols)
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     df.to_csv(args.out_csv, index=False)
-    print(f"[OK] wrote {len(df)} rows -> {args.out_csv}", flush=True)
+    logging.info("wrote %s rows -> %s", len(df), args.out_csv)
 
 
 if __name__ == "__main__":

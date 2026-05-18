@@ -40,9 +40,12 @@ python make_blast_db_per_split.py \
 """
 import argparse
 import glob
+import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 def parse_split_file(path: str) -> Dict[str, Tuple[str, List[int]]]:
     entries: Dict[str, Tuple[str, List[int]]] = {}
@@ -121,7 +124,7 @@ def main():
         df.to_csv(df_out, index=False)
         # membership
         all_membership.extend([(e, split_name) for e in df["Entry"].tolist()])
-        print(f"[OK] {split_name}: {len(df)} entries -> {df_out}")
+        logging.info("%s: %s entries -> %s", split_name, len(df), df_out)
 
     # Overlap report
     mem_df = pd.DataFrame(all_membership, columns=["Entry","Split"])
@@ -131,7 +134,7 @@ def main():
                  .query("n > 1"))
     overlap_path = out_dir / "overlap_report.csv"
     dup.to_csv(overlap_path, index=False)
-    print(f"[INFO] Overlap entries: {len(dup)} -> {overlap_path}")
+    logging.info("Overlap entries: %s -> %s", len(dup), overlap_path)
 
     # Train-only unions
     split_names = list(per_split_df.keys())
@@ -144,9 +147,9 @@ def main():
         train_df = train_df.drop_duplicates(subset=["Entry"], keep="first")
         out_csv = out_dir / f"db_train_{s}.csv"
         train_df.to_csv(out_csv, index=False)
-        print(f"[OK] train for {s}: {len(train_df)} entries -> {out_csv}")
+        logging.info("train for %s: %s entries -> %s", s, len(train_df), out_csv)
 
-    print("[DONE] All per-split and train DBs built.")
+    logging.info("All per-split and train DBs built.")
 
 if __name__ == "__main__":
     main()

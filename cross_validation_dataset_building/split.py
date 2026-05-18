@@ -1,4 +1,5 @@
 import json
+import logging
 import pandas as pd
 import networkx as nx
 from collections import defaultdict, Counter
@@ -7,6 +8,8 @@ import os
 import pickle
 import numpy as np
 from itertools import combinations
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import biotite.structure.io.pdbx as pdbx
 import biotite.database.afdb as afdb
@@ -48,7 +51,7 @@ def structure_exists(protein_id, expected_seq=None):
         else:
             cif_path = afdb.fetch(protein_id, format='cif', target_path=PDB_DIR)
     except Exception as err:
-        print(f"[DOWNLOAD ERROR] {protein_id}: {err}")
+        logging.error("DOWNLOAD ERROR %s: %s", protein_id, err)
         return False
 
     # Get aminoacid sequence from the structure file
@@ -56,10 +59,10 @@ def structure_exists(protein_id, expected_seq=None):
         cif = pdbx.CIFFile.read(cif_path)
         chains_sequences = pdbx.get_sequence(cif)
     except Exception as err:
-        print(f"[READ ERROR] {protein_id}: {err}")
+        logging.error("READ ERROR %s: %s", protein_id, err)
         # Remove demaged file
         os.remove(cif_path)
-        print(f"  → Deleted {cif_path}")
+        logging.info("Deleted %s", cif_path)
         return False
 
     # Compare sequences, remove if doesn't match
@@ -67,15 +70,15 @@ def structure_exists(protein_id, expected_seq=None):
         try:
             struct_seq = str(chains_sequences.get("A"))
         except Exception as err:
-            print(f"[PARSE ERROR] {protein_id}: {err}")
+            logging.error("PARSE ERROR %s: %s", protein_id, err)
             # Remove demaged file
             os.remove(cif_path)
-            print(f"  → Deleted {cif_path}")
+            logging.info("Deleted %s", cif_path)
             return False
         if struct_seq != expected_seq:
-            print(f"[MISMATCH] {protein_id}: expected {len(expected_seq)} aa, got {len(struct_seq)} aa")
+            logging.error("MISMATCH %s: expected %s aa, got %s aa", protein_id, len(expected_seq), len(struct_seq))
             os.remove(cif_path)
-            print(f"  → Deleted {cif_path}")
+            logging.info("Deleted %s", cif_path)
             return False
 
     return True

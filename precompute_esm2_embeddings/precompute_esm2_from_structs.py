@@ -10,6 +10,8 @@ import hashlib
 import logging
 from typing import Dict, List, Tuple
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -206,7 +208,7 @@ def main():
     files = sorted(set(files))
 
     if not files:
-        print("[ERROR] No structure files found.")
+        logging.error("No structure files found.")
         sys.exit(1)
 
     # ---- extract sequences ----

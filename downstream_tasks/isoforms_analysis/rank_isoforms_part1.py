@@ -40,9 +40,12 @@ os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
 os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
 # ------------------------------------------------------------------------------
 
+import logging
 import sys
 import argparse
 from typing import Dict, List, Optional, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -155,29 +158,32 @@ def run_stage(
     with_esm2 = [s for s in stems if esm_exists_for_origin(esm2_dir, s)]
     without_esm2 = [s for s in stems if s not in set(with_esm2)]
 
-    print(f"[INFO] total structures: {len(stems)}", flush=True)
-    print(f"[INFO] esm2_dir: {esm2_dir if esm2_dir else '(none)'}", flush=True)
-    print(f"[INFO] split: ESM2={len(with_esm2)}, noMSA={len(without_esm2)}", flush=True)
+    logging.info("total structures: %s", len(stems))
+    logging.info("msa_dir: %s", msa_dir if msa_dir else "(none)")
+    if msa_dir:
+        logging.info("indexed MSA stems: %s", len(msa_stems))
+    logging.info("hybrid split: MSA=%s, noMSA=%s", len(with_msa), len(without_msa))
+
+    if msa_dir and len(with_msa) == 0:
+        # Helpful debug in case of naming mismatch
+        ex = stems[0]
+        pat = os.path.join(msa_dir, f"MSA_{ex}_*_*.fasta")
+        logging.warning("No MSAs matched. Example stem='%s'. Example pattern='%s'", ex, pat)
+        sample = glob(pat)[:3]
+        logging.warning("Example matches (first 3): %s", sample)
 
     preds_raw: Dict[str, np.ndarray] = {}
 
-    if with_esm2:
-        paths = [by_stem[s] for s in with_esm2]
-        preds_raw.update(
-            run_cv_catalytic_inference(
-                paths, with_esm2, mode="esm2", ncores=ncores, esm2_dir=esm2_dir
-            )
-        )
-        print(f"[OK] inferred ESM2 group: {len(with_esm2)}", flush=True)
+    # Run inference only twice (fast)
+    if with_msa:
+        paths = [stem_to_path[s] for s in with_msa]
+        preds_raw.update(run_cv_catalytic_inference(paths, with_msa, use_msa=True, ncores=args.ncores, msa_dir=msa_dir))
+        logging.info("inferred MSA group: %s", len(with_msa))
 
-    if without_esm2:
-        paths = [by_stem[s] for s in without_esm2]
-        preds_raw.update(
-            run_cv_catalytic_inference(
-                paths, without_esm2, mode="nomsa", ncores=ncores, esm2_dir=None
-            )
-        )
-        print(f"[OK] inferred noMSA group: {len(without_esm2)}", flush=True)
+    if without_msa:
+        paths = [stem_to_path[s] for s in without_msa]
+        preds_raw.update(run_cv_catalytic_inference(paths, without_msa, use_msa=False, ncores=args.ncores, msa_dir=None))
+        logging.info("inferred noMSA group: %s", len(without_msa))
 
     isoform_ids: List[str] = []
     base_ids: List[str] = []
@@ -239,8 +245,8 @@ def run_stage(
         structures_dir=np.array(structures_dir, dtype="U"),
     )
 
-    print(f"[OK] wrote {kept} isoforms into one file -> {out_npz}", flush=True)
-    print(f"[INFO] total prob elements: {prob_concat.size:,}", flush=True)
+    logging.info("wrote %s isoforms into one file -> %s", kept, out_npz)
+    logging.info("total prob elements: %s", f"{prob_concat.size:,}")
 
     if manifest_csv:
         os.makedirs(os.path.dirname(manifest_csv) or ".", exist_ok=True)
@@ -253,30 +259,8 @@ def run_stage(
             "offset_start": offsets[:-1],
             "offset_end": offsets[1:],
         })
-        df.to_csv(manifest_csv, index=False)
-        print(f"[OK] wrote manifest -> {manifest_csv}", flush=True)
-
-
-def main():
-    ap = argparse.ArgumentParser(
-        description="GPU stage: ESM2-first isoform inference, save ONE npz with concatenated predictions."
-    )
-    ap.add_argument("--structures_dir", required=True, help="Directory with isoform PDBs (*.pdb)")
-    ap.add_argument("--esm2_dir", default=None, help="Root of cached ESM2 embeddings.")
-    ap.add_argument("--out_npz", required=True, help="Output .npz file path (single file).")
-    ap.add_argument("--manifest_csv", default=None, help="Optional manifest CSV path.")
-    ap.add_argument("--ncores", type=int, default=8, help="ncores passed to predict_bindingsites")
-    ap.add_argument("--min_prob", type=float, default=0.1, help="Set probs < min_prob to 0 before saving")
-    args = ap.parse_args()
-
-    run_stage(
-        structures_dir=args.structures_dir,
-        esm2_dir=args.esm2_dir,
-        out_npz=args.out_npz,
-        manifest_csv=args.manifest_csv,
-        ncores=args.ncores,
-        min_prob=args.min_prob,
-    )
+        df.to_csv(manifest, index=False)
+        logging.info("wrote manifest -> %s", manifest)
 
 
 if __name__ == "__main__":

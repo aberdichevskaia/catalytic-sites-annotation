@@ -53,10 +53,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 from glob import glob
 from typing import Dict, List, Optional, Set, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -223,7 +226,7 @@ def parse_label_files(
                 if strict_duplicates:
                     raise ValueError(msg)
                 else:
-                    print(f"[WARN] {msg} -> keeping first occurrence, skipping duplicate.")
+                    logging.warning("%s -> keeping first occurrence, skipping duplicate.", msg)
                     return
             seen.add(cur_id)
             records.append((cur_id, int(length), int(n_pos)))
@@ -280,9 +283,11 @@ def build_per_chain_with_metadata(
         raise ValueError("No overlap between dataset.csv Sequence_IDs and label files Sequence_IDs")
 
     if len(common) < len(dataset_df):
-        print(f"[WARN] Missing labels for {len(dataset_df) - len(common)} / {len(dataset_df)} dataset chains. Dropping them.")
+        logging.warning("Missing labels for %s / %s dataset chains. Dropping them.",
+                        len(dataset_df) - len(common), len(dataset_df))
     if len(common) < len(per_chain):
-        print(f"[WARN] Labels contain {len(per_chain) - len(common)} chains not in dataset.csv. Dropping them.")
+        logging.warning("Labels contain %s chains not in dataset.csv. Dropping them.",
+                        len(per_chain) - len(common))
 
     per_chain = per_chain[per_chain["Sequence_ID"].isin(common)].copy()
     dataset_sub = dataset_df[dataset_df["Sequence_ID"].isin(common)].copy()
@@ -388,7 +393,7 @@ def plot_catalytic_per_protein_binned_ge4(per_chain: pd.DataFrame, out_svg: str,
     x = x[np.isfinite(x)].astype(int)
     x = x[x >= 1]
     if x.size == 0:
-        print("[WARN] No proteins with n_catalytic>=1. Skip plot.")
+        logging.warning("No proteins with n_catalytic>=1. Skip plot.")
         return
 
     # Fold tail into >=cap by clipping everything >=cap to exactly cap
@@ -662,7 +667,7 @@ def plot_fraction_accessions_ge1_pdb(n_struct: np.ndarray, out_svg: str) -> None
     base = plt.colormaps["Purples"](0.65)
     n_struct = np.asarray(n_struct, dtype=int)
     if n_struct.size == 0:
-        print("[WARN] Empty n_struct. Skip plot.")
+        logging.warning("Empty n_struct. Skip plot.")
         return
 
     frac_ge1 = float((n_struct >= 1).mean())
@@ -734,7 +739,7 @@ def plot_top_accessions_by_pdb_count(
     items.sort(key=lambda kv: kv[1], reverse=True)
     top = items[:top_k]
     if not top:
-        print("[WARN] Empty acc_to_n. Skip plot.")
+        logging.warning("Empty acc_to_n. Skip plot.")
         return
 
     # Use protein names; fallback to accession if name missing/empty
@@ -780,7 +785,7 @@ def plot_component_sizes_hist_gecap(comp_sizes: np.ndarray, cap: int, out_svg: s
     sizes = np.asarray(comp_sizes, dtype=int)
     sizes = sizes[sizes >= 1]
     if sizes.size == 0:
-        print("[WARN] Empty component sizes. Skip plot.")
+        logging.warning("Empty component sizes. Skip plot.")
         return
 
     # Fold tail into >=cap by clipping
@@ -826,7 +831,7 @@ def plot_top_components(comp_sizes: np.ndarray, top_k: int, out_svg: str) -> Non
     sizes = np.asarray(comp_sizes, dtype=int)
     sizes = sizes[sizes >= 1]
     if sizes.size == 0:
-        print("[WARN] Empty component sizes. Skip plot.")
+        logging.warning("Empty component sizes. Skip plot.")
         return
 
     top = np.sort(sizes)[::-1][:top_k]
@@ -864,7 +869,7 @@ def cmd_overview(args: argparse.Namespace) -> None:
 
     out_table = os.path.join(args.out_dir, "table_overview.csv")
     compute_table_overview(per_chain, args.weight_col, out_table)
-    print(f"[OK] Wrote {out_table}")
+    logging.info("Wrote %s", out_table)
 
     plot_catalytic_per_protein_binned_ge4(
         per_chain,
@@ -875,7 +880,7 @@ def cmd_overview(args: argparse.Namespace) -> None:
         per_chain,
         out_svg=os.path.join(args.out_dir, "hist_catalytic_per_protein_binned_ge4_logy.svg"),
     )
-    print("[OK] Wrote catalytic-per-protein plots")
+    logging.info("Wrote catalytic-per-protein plots")
 
     # EC top-level distribution (pie + standalone legend)
     plot_ec_top_level_pie(
@@ -917,7 +922,7 @@ def cmd_chem(args: argparse.Namespace) -> None:
 
     overall_out = os.path.join(args.out_dir, "chemotype_overall.csv")
     overall.to_csv(overall_out, index=False)
-    print(f"[OK] Wrote {overall_out}")
+    logging.info("Wrote %s", overall_out)
 
     # By split (long)
     by_split = (
@@ -930,7 +935,7 @@ def cmd_chem(args: argparse.Namespace) -> None:
     )
     by_split_out = os.path.join(args.out_dir, "chemotype_by_split_long.csv")
     by_split.to_csv(by_split_out, index=False)
-    print(f"[OK] Wrote {by_split_out}")
+    logging.info("Wrote %s", by_split_out)
 
     split_order = sorted(df["Set_Type"].astype(str).unique().tolist(), key=lambda s: (int(re.findall(r"\d+", s)[0]) if re.findall(r"\d+", s) else 10**9, s))
     class_order = list(range(8))
@@ -961,7 +966,7 @@ def cmd_chem(args: argparse.Namespace) -> None:
 
     save_chemotype_legend(os.path.join(args.out_dir, "chemotype_legend.png"), fontsize=10)
 
-    print("[OK] Wrote chemotype plots (raw + normalized)")
+    logging.info("Wrote chemotype plots (raw + normalized)")
 
 
 def cmd_redundancy(args: argparse.Namespace) -> None:
@@ -985,7 +990,7 @@ def cmd_redundancy(args: argparse.Namespace) -> None:
     )
     comp_out = os.path.join(args.out_dir, "connected_components_summary.csv")
     comp.to_csv(comp_out, index=False)
-    print(f"[OK] Wrote {comp_out}")
+    logging.info("Wrote %s", comp_out)
 
     sizes = comp["n_chains"].to_numpy(dtype=int)
     plot_component_sizes_hist_gecap(
@@ -994,7 +999,7 @@ def cmd_redundancy(args: argparse.Namespace) -> None:
     plot_top_components(
         sizes, top_k=10, out_svg=os.path.join(args.out_dir, "cc_sizes_top10.svg")
     )
-    print("[OK] Wrote connected-components plots")
+    logging.info("Wrote connected-components plots")
 
     # Structural coverage (optional)
     if args.protein_json:
@@ -1023,7 +1028,7 @@ def cmd_redundancy(args: argparse.Namespace) -> None:
         plot_top_accessions_by_pdb_count(
             acc_to_n, acc_to_name, top_k=10, out_svg=os.path.join(args.out_dir, "structcov_top10_accessions_by_pdb.svg")
         )
-        print("[OK] Wrote structural-coverage plots")
+        logging.info("Wrote structural-coverage plots")
 
 
 def cmd_all(args: argparse.Namespace) -> None:

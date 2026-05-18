@@ -31,11 +31,14 @@ Requirements:
 import os
 import glob
 import argparse
+import logging
 import shutil
 import subprocess
 import pickle
 from pathlib import Path
 from typing import List, Tuple, Set, Dict, Iterable
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -114,7 +117,7 @@ def save_subset_results(output_dir, subset_key, title,
     pkl_path = os.path.join(output_dir, f"{subset_key}_results.pkl")
     with open(pkl_path, "wb") as f:
         pickle.dump(payload, f)
-    print(f"[OK] {subset_key} pickle -> {pkl_path}")
+    logging.info("%s pickle -> %s", subset_key, pkl_path)
 
     fig, _ = make_PR_curve(
         labels=labels,
@@ -130,7 +133,7 @@ def save_subset_results(output_dir, subset_key, title,
     png_path = os.path.join(output_dir, f"{subset_key}_plot.png")
     fig.savefig(png_path, dpi=300)
     plt.close(fig)
-    print(f"[OK] {subset_key} PR-curve -> {png_path}")
+    logging.info("%s PR-curve -> %s", subset_key, png_path)
 
 
 # -------------------- parsing & DB --------------------

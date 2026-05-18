@@ -13,7 +13,10 @@ Output per ACC:
 """
 
 import os, gzip, json, argparse
+import logging
 from typing import Dict, Any, Optional, Iterable, List, Tuple, Set
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 # --------------------- robust readers ---------------------
 
@@ -313,7 +316,7 @@ def main():
     with open(args.out_json, "w") as f:
         json.dump(out, f, indent=2, sort_keys=True)
 
-    print(f"[OK] scanned: {n_seen} | human: {n_human} | wrote entries: {len(out)} -> {args.out_json}")
+    logging.info("scanned: %s | human: %s | wrote entries: %s -> %s", n_seen, n_human, len(out), args.out_json)
 
 if __name__ == "__main__":
     main()

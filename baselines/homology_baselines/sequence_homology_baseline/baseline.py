@@ -16,8 +16,11 @@ Outputs: per-subset pickles + PR-curve PNGs.
 """
 
 import os, json, argparse, pickle
+import logging
 from multiprocessing import Pool, cpu_count
 import numpy as np
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import biotite.sequence.align as align
 from biotite.sequence import ProteinSequence
@@ -285,8 +288,9 @@ def main():
     val_split = [split_names[(idx + 3) % 5]]
     test_split = [split_names[(idx + 4) % 5]]
 
-    print(f"[CV] fold={cv} | train={train_splits} | val={val_split} | test={test_split}")
-    print(f"[CFG] cutoff={CUTOFF} denom={DENOM} minlen={MIN_ALIGN_LEN} topk={TOPK_HITS} tw_exp={TEMPLATE_WEIGHT_EXP}")
+    logging.info("fold=%s | train=%s | val=%s | test=%s", cv, train_splits, val_split, test_split)
+    logging.info("cutoff=%s denom=%s minlen=%s topk=%s tw_exp=%s",
+                 CUTOFF, DENOM, MIN_ALIGN_LEN, TOPK_HITS, TEMPLATE_WEIGHT_EXP)
 
     data = load_splits(args.splits_json)
     templ = collect_from_splits(data, train_splits)
@@ -331,7 +335,7 @@ def main():
                 outs_train_noskip["labels"], outs_train_noskip["predictions"], outs_train_noskip["weights"],
                 outs_train_noskip["ids"], outs_train_noskip["splits"], model_name)
 
-    print("[DONE] All results saved.")
+    logging.info("All results saved.")
 
 if __name__ == "__main__":
     main()

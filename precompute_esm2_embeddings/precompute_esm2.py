@@ -10,6 +10,8 @@ import hashlib
 import logging
 from typing import List, Tuple, Dict
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -172,7 +174,7 @@ def main():
             origin = str(origin)
             seq = sanitize_sequence(str(seq))
             if origin in origin_to_seq and origin_to_seq[origin] != seq:
-                print(f"[WARN] origin {origin} has different sequences across splits!", file=sys.stderr)
+                logging.warning("origin %s has different sequences across splits!", origin)
             origin_to_seq[origin] = seq
 
     items = sorted(origin_to_seq.items(), key=lambda x: len(x[1]), reverse=True)

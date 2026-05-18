@@ -22,8 +22,11 @@ Output:
 """
 
 import argparse
+import logging
 import re
 import pandas as pd
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 # Match ONLY the third element inside each triplet ['..','..','123']
 TRIPLET_IDX_RE = re.compile(r"\[\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'(\d+)'\s*\]")
@@ -108,7 +111,7 @@ def main():
         out = out.sort_values(sort_by, ascending=False)
 
     out.to_csv(args.out_csv, index=False)
-    print(f"[OK] {len(out)} rows with novel catalytic sites -> {args.out_csv}")
+    logging.info("%s rows with novel catalytic sites -> %s", len(out), args.out_csv)
 
 if __name__ == "__main__":
     main()

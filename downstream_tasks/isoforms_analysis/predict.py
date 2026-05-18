@@ -53,6 +53,7 @@ os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
 os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
 # -------------------------------------------------------------------------------
 
+import logging
 import re
 import sys
 import json
@@ -60,6 +61,8 @@ import time
 import argparse
 from glob import glob
 from typing import Dict, List, Tuple, Optional, Any
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import pandas as pd
@@ -358,7 +361,7 @@ def hits_to_str(probs: np.ndarray, resids: Optional[np.ndarray], thr: float) -> 
 # ----------------------- CLI ---------------------
 def main():
     t0 = time.time()
-    print("[BOOT] starting predict.py", flush=True)
+    logging.info("starting predict.py")
 
     ap = argparse.ArgumentParser(
         description=(
@@ -386,23 +389,29 @@ def main():
     esm2_dir = ensure_trailing_slash(args.esm2_dir) if args.use_esm2 and args.esm2_dir else None
 
     if args.use_esm2 and not esm2_dir:
-        raise SystemExit("[ERROR] --use_esm2 requires --esm2_dir")
+        raise SystemExit("--use_esm2 requires --esm2_dir")
 
     # 1) Collect structures.
-    print(f"[STEP] scanning structures under {structures_dir}", flush=True)
-    by_runname = collect_structure_paths(structures_dir)
-    display_for: Dict[str, str] = {}
-    for rn, p in by_runname.items():
-        display_for[rn] = entry_from_path(p)
+    logging.info("scanning structures under %s", structures_dir)
+    cif_paths = glob(os.path.join(structures_dir, "*.cif"))
+    pdb_paths = glob(os.path.join(structures_dir, "*.pdb"))
+    by_runname: Dict[str, str] = {}     # stem -> path
+    display_for: Dict[str, str] = {}    # stem -> display id
+
+    for p in cif_paths + pdb_paths:
+        rn = af_stem(p)            # 'AF-P81877-F1-model_v6' or 'A0A0K2S4Q6-1'
+        disp = entry_from_path(p)  # 'P81877_F1' or 'A0A0K2S4Q6-1'
+        prev = by_runname.get(rn)
+        # Prefer .pdb when both exist
+        if prev is None or (prev.lower().endswith(".cif") and p.lower().endswith(".pdb")):
+            by_runname[rn] = p
+            display_for[rn] = disp
 
     entries_all = sorted(by_runname.keys())
     if not entries_all:
         raise SystemExit(f"No structures in {structures_dir} (*.cif|*.pdb)")
-    print(
-        f"[INFO] using {len(entries_all)} structures (prefer .pdb when both exist) "
-        f"in {time.time() - t0:.1f}s",
-        flush=True,
-    )
+    logging.info("using %s structures (prefer .pdb when both exist) in %.1fs",
+                 len(entries_all), time.time() - t0)
 
     # 2) Metadata
     meta = MetaDB(args.meta_json)
@@ -424,17 +433,11 @@ def main():
         for rn in without_esm2:
             inference_type[rn] = "nomsa"
 
-        print(
-            f"[INFO] ESM2 MODE: esm2 for {len(with_esm2)}, "
-            f"fallback noMSA for {len(without_esm2)}.",
-            flush=True,
-        )
+        logging.info("ESM2 MODE: esm2 for %s, fallback noMSA for %s.",
+                     len(with_esm2), len(without_esm2))
         if without_esm2:
-            print(
-                "[DEBUG] examples without detected ESM2 cache (first 10): "
-                + ", ".join(without_esm2[:10]),
-                flush=True,
-            )
+            logging.debug("examples without detected ESM2 cache (first 10): %s",
+                          ", ".join(without_esm2[:10]))
 
         if with_esm2:
             paths = [by_runname[rn] for rn in with_esm2]
@@ -466,17 +469,11 @@ def main():
         for rn in without_msa:
             inference_type[rn] = "nomsa"
 
-        print(
-            f"[INFO] STRICT MSA MODE: will NOT build missing MSAs; "
-            f"use_MSA for {len(with_msa)}, noMSA for {len(without_msa)}.",
-            flush=True,
-        )
+        logging.info("STRICT MSA MODE: will NOT build missing MSAs; use_MSA for %s, noMSA for %s.",
+                     len(with_msa), len(without_msa))
         if args.use_msa and msa_dir and without_msa:
-            print(
-                "[DEBUG] examples without detected MSA (first 10): "
-                + ", ".join(without_msa[:10]),
-                flush=True,
-            )
+            logging.debug("examples without detected MSA (first 10): %s",
+                          ", ".join(without_msa[:10]))
 
         if with_msa:
             paths = [by_runname[rn] for rn in with_msa]
@@ -544,7 +541,7 @@ def main():
     df = pd.DataFrame(rows, columns=cols)
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     df.to_csv(args.out_csv, index=False)
-    print(f"[OK] wrote {len(df)} rows -> {args.out_csv}", flush=True)
+    logging.info("wrote %s rows -> %s", len(df), args.out_csv)
 
 
 if __name__ == "__main__":

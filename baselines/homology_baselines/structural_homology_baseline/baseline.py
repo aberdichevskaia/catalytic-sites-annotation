@@ -6,9 +6,12 @@
 
 import os
 import json
+import logging
 import pickle
 import argparse
 from multiprocessing import Pool, cpu_count
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
 import biotite.sequence.align as align
@@ -117,7 +120,7 @@ def save_subset_results(output_dir, subset_key, title,
     pkl_path = os.path.join(output_dir, f"{subset_key}_results.pkl")
     with open(pkl_path, "wb") as f:
         pickle.dump(payload, f)
-    print(f"[OK] {subset_key} pickle -> {pkl_path}")
+    logging.info("%s pickle -> %s", subset_key, pkl_path)
 
     fig, _ = make_PR_curve(
         labels=labels,
@@ -132,7 +135,7 @@ def save_subset_results(output_dir, subset_key, title,
     )
     png_path = os.path.join(output_dir, f"{subset_key}_plot.png")
     fig.savefig(png_path, dpi=300)
-    print(f"[OK] {subset_key} PR-curve -> {png_path}")
+    logging.info("%s PR-curve -> %s", subset_key, png_path)
 
 
 # -------------------- Data preparation --------------------
@@ -568,8 +571,8 @@ def main():
     val_split = [split_names[validate_index]]
     test_split = [split_names[test_index]]
 
-    print(f"[CV] fold={cv_fold} | train={train_splits} | val={val_split} | test={test_split}")
-    print(f"[CFG] TEMPLATE_WEIGHT_EXP={TEMPLATE_WEIGHT_EXP}")
+    logging.info("fold=%s | train=%s | val=%s | test=%s", cv_fold, train_splits, val_split, test_split)
+    logging.info("TEMPLATE_WEIGHT_EXP=%s", TEMPLATE_WEIGHT_EXP)
 
     # Load split JSON
     all_data = load_splits(args.splits_json)
@@ -669,7 +672,7 @@ def main():
             batch_size=0,
         )
 
-    print("[DONE] All results saved.")
+    logging.info("All results saved.")
 
 
 if __name__ == "__main__":
