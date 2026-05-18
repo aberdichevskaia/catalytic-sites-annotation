@@ -31,7 +31,6 @@ def read_fasta(path: str) -> Iterable[Tuple[str, str]]:
             yield name, "".join(seq)
 
 
-
 def clean_sequences(records: Iterable[Tuple[str, str]]) -> list[Tuple[str, str]]:
     cleaned = []
     for header, seq in records:

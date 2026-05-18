@@ -40,8 +40,14 @@ def get_no_positive_seqids(annotations):
     return no_pos
 
 def main():
-    base_dir = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem"
-    save_dir = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/cleaned"
+    import argparse
+    ap = argparse.ArgumentParser(description="Remove sequences with no positive labels from cross-validation splits.")
+    ap.add_argument("--base_dir", required=True, help="Directory containing split1.txt..split5.txt and dataset.csv")
+    ap.add_argument("--save_dir", required=True, help="Output directory for cleaned split files and dataset.csv")
+    args = ap.parse_args()
+
+    base_dir = args.base_dir
+    save_dir = args.save_dir
     csv_path = os.path.join(base_dir, "dataset.csv")
 
     # load dataset.csv

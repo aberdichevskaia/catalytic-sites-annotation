@@ -1,6 +1,16 @@
 import pickle
 
 
+def acc_only(name: str) -> str:
+    """Extract the base accession from a display name by splitting on the first '_'.
+
+    Examples:
+        'P81877_F1'    -> 'P81877'
+        'A0A0K2S4Q6-1' -> 'A0A0K2S4Q6-1'  (no underscore -> unchanged)
+    """
+    return name.split("_", 1)[0].upper()
+
+
 def parse_batch_file(path: str) -> dict:
     """Parse an annotation pickle file into {chain_id: list_of_annotation_lines}.
 

@@ -1,6 +1,6 @@
 #!/bin/bash
-set -u  # падать на неинициализированных переменных
-# set -e  # (опционально) падать на первой ошибке; если хочешь прогнать все фолды — не ставь
+set -u  # exit on uninitialized variables
+# set -e  # (optional) exit on first error; omit if you want all folds to run
 
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 export KERAS_BACKEND=jax

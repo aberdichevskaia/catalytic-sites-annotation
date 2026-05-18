@@ -55,7 +55,7 @@ def build_one_msa(sequence: str, out_file: str, cores: int) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="Precompute MSAs for AF Human so predict.py won't write anything.")
-    ap.add_argument("--structures_dir", required=True, help="e.g. /home/iscb/wolfson/jeromet/AFDB/Human")
+    ap.add_argument("--structures_dir", required=True, help="e.g. /path/to/structures")
     ap.add_argument("--out_msa_dir", required=True, help="Writable folder for MSA files")
     ap.add_argument("--cores_per_job", type=int, default=4, help="Threads per mmseqs run")
     ap.add_argument("--only_missing", action="store_true", help="Skip if target MSA file exists")

@@ -286,14 +286,13 @@ def predict_one_target(args):
     if (t_idx % DIAG_EVERY) == 0:
         if raw_best_scores:
             arr = np.array(raw_best_scores, float)
-            print(
-                f"[diag] target={t_id} n_aln={len(arr)} "
-                f"max={arr.max():.3f} q50={np.percentile(arr,50):.3f} "
-                f"q90={np.percentile(arr,90):.3f} q95={np.percentile(arr,95):.3f}",
-                flush=True
+            logging.debug(
+                "[diag] target=%s n_aln=%s max=%.3f q50=%.3f q90=%.3f q95=%.3f",
+                t_id, len(arr), arr.max(),
+                np.percentile(arr, 50), np.percentile(arr, 90), np.percentile(arr, 95)
             )
         else:
-            print(f"[diag] target={t_id} n_aln=0", flush=True)
+            logging.debug("[diag] target=%s n_aln=0", t_id)
 
     # 2) Containers for position-wise aggregation and coverage
     pred_per_denom = {d: np.zeros(len(t_aa), float) for d in G_DENOMS}
@@ -321,7 +320,8 @@ def predict_one_target(args):
                 denom = max(max_score - thr, EPS)
 
             if (t_idx % DIAG_EVERY) == 0:
-                print(f"[diag] target={t_id} denom={d} thr={thr:.3f} max={max_score:.3f} kept={len(kept)}", flush=True)
+                logging.debug("[diag] target=%s denom=%s thr=%.3f max=%.3f kept=%s",
+                              t_id, d, thr, max_score, len(kept))
 
             for score, aln, j in kept:
                 # Map gapped-3Di indices: target3Di_idx -> templ3Di_idx
@@ -364,7 +364,7 @@ def predict_one_target(args):
         covered_mask = cnt_per_denom[d] > 0
         cov_ratio = covered_mask.mean() if len(covered_mask) > 0 else 0.0
         if cov_ratio < 0.05:
-            print(f"[warn] low coverage {cov_ratio:.3f} for {t_id} (denom={d})", flush=True)
+            logging.warning("[warn] low coverage %.3f for %s (denom=%s)", cov_ratio, t_id, d)
 
         pred = pred_per_denom[d]
         cnt = cnt_per_denom[d]

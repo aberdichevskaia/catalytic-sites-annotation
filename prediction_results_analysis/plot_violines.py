@@ -9,12 +9,15 @@ Violin plot of *log(weight)* grouped by per-sequence F@1 (0 or 1).
 """
 
 import argparse
+import logging
 import pickle
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 
 def load_results(pkl_path: str):
@@ -105,7 +108,7 @@ def main():
     parser.add_argument(
         "--input",
         type=str,
-        default="/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology_baseline/results_adaptive_cutoff_den2_cv1/train_results.pkl",
+        required=True,
         help="Path to *_results.pkl with predictions/labels/weights",
     )
     parser.add_argument(
@@ -139,15 +142,15 @@ def main():
 
     # Console stats in log-space
     n = len(weights)
-    print(f"[info] sequences: {n}")
-    print(f"[info] F@1=0: {len(w0)} | F@1=1: {len(w1)}")
+    logging.info("sequences: %s", n)
+    logging.info("F@1=0: %s | F@1=1: %s", len(w0), len(w1))
     if len(w0) > 0:
-        print(f"[info] log-weight stats (F@1=0): mean={np.mean(w0):.4f} median={np.median(w0):.4f}")
+        logging.info("log-weight stats (F@1=0): mean=%.4f median=%.4f", np.mean(w0), np.median(w0))
     if len(w1) > 0:
-        print(f"[info] log-weight stats (F@1=1): mean={np.mean(w1):.4f} median={np.median(w1):.4f}")
+        logging.info("log-weight stats (F@1=1): mean=%.4f median=%.4f", np.mean(w1), np.median(w1))
 
     plot_violin(w0, w1, args.title, args.output, base=args.log_base)
-    print(f"[ok] saved: {args.output}")
+    logging.info("saved: %s", args.output)
 
 
 if __name__ == "__main__":

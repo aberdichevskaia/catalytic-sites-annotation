@@ -13,7 +13,7 @@ while read -r line; do
   tmp_file="$out_file.tmp"
   : > "$tmp_file"
 
-  # находим все PDB для base_id
+  # find all PDBs for base_id
   found=0
   for f in "$pdb_dir/${base_id}-"*.pdb; do
     [ -e "$f" ] || continue
@@ -27,7 +27,7 @@ while read -r line; do
     continue
   fi
 
-  # стабильно сортируем и финализируем
+  # sort deterministically and finalise
   sort -u "$tmp_file" > "$out_file"
   rm -f "$tmp_file"
 

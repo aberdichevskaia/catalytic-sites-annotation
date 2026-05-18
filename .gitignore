@@ -1,7 +1,6 @@
 config.yaml
 *.txt
 !requirements.txt
-!refactoring_plan.txt
 *.csv
 *.pdf
 *.png
@@ -26,3 +25,4 @@ config.yaml
 *.out
 *.index
 *.claude/*
+__pycache__/

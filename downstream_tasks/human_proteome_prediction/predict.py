@@ -51,6 +51,8 @@ import argparse
 from glob import glob
 from typing import Dict, List, Tuple, Optional, Any
 
+from utils.data_loading import acc_only
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 import numpy as np
@@ -95,11 +97,6 @@ def af_stem(path: str) -> str:
     '/.../AF-P81877-F1-model_v6.cif' -> 'AF-P81877-F1-model_v6'
     """
     return os.path.splitext(os.path.basename(path))[0]
-
-
-def acc_only(name: str) -> str:
-    """'P81877_F1' -> 'P81877'"""
-    return name.split("_", 1)[0].upper()
 
 
 # ---- MSA existence check for AF-stem ----

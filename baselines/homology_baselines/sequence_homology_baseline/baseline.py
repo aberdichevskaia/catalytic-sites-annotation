@@ -109,7 +109,7 @@ def save_subset(out_dir, subset_key, title, labels, predictions, weights, ids, s
     with open(pkl, "wb") as f: pickle.dump(payload, f)
     png = os.path.join(out_dir, f"{subset_key}.png")
     aupr = pr_and_plot(labels, predictions, weights, subset_key, title, png)
-    print(f"[{subset_key}] AUCPR={aupr:.4f}  -> {pkl} ; {png}")
+    logging.info("%s AUCPR=%.4f  -> %s ; %s", subset_key, aupr, pkl, png)
 
 # --------------------- Worker globals ---------------------
 G_TEMPL_AA = None

@@ -30,7 +30,13 @@ def parse_annotation(file_path):
     return annotations
 
 def main():
-    base_dir = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation"
+    import argparse
+    ap = argparse.ArgumentParser(description="Summarise annotation lengths and label counts per split.")
+    ap.add_argument("--base_dir", required=True, help="Directory containing split1.txt..split5.txt")
+    ap.add_argument("--out_json", required=True, help="Output JSON path for annotations summary")
+    args = ap.parse_args()
+
+    base_dir = args.base_dir
     summary_by_split = {}
 
     for i in range(1, 6):
@@ -50,7 +56,7 @@ def main():
 
         summary_by_split[split_name] = summary
 
-    out_json = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation/annotations_summary.json"
+    out_json = args.out_json
     with open(out_json, "w") as jf:
         json.dump(summary_by_split, jf, indent=2, ensure_ascii=False)
     print(f"Saved summary to {out_json}\n")

@@ -1,6 +1,6 @@
 #!/bin/bash
-set -u  # падать на неинициализированных переменных
-# set -e  # (опционально) падать на первой ошибке; если хочешь прогнать все белки — НЕ ставь
+set -u  # exit on uninitialized variables
+# set -e  # (optional) exit on first error; omit if you want all proteins to run
 set -o pipefail
 
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
@@ -9,7 +9,7 @@ conda activate scannet_keras3
 
 python_script="/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub/predict_bindingsites.py"
 
-# Папка, где лежат файлы-группы (по одному на base_id):
+# Directory containing group files (one per base_id):
 # O14492_isoforms.txt, O00555_isoforms.txt, ...
 groups_dir="${1:-/home/iscb/wolfson/annab4/outputs/isoform_groups_todo}"
 
@@ -41,7 +41,7 @@ for path_to_proteins in "$groups_dir"/*_isoforms.txt; do
   echo "    batch_cxc=$batch_cxc"
   echo "    log=$logfile"
 
-  # Запуск + логирование stdout/stderr в файл
+  # Run and log stdout/stderr to file
   #if python "$python_script" "$path_to_proteins" --assembly --mode "$mode" --batch_cxc "$batch_cxc" \
   if python "$python_script" "$path_to_proteins" --mode "$mode" --batch_cxc "$batch_cxc" --use_ESM2 --esm2_dir /home/iscb/wolfson/annab4/Data/Human_Isoforms_ESM2_150M_layer30 --predictions_folder /home/iscb/wolfson/annab4/isoforms_predictions_for_report/ \
       > >(tee -a "$logfile") 2> >(tee -a "$logfile" >&2); then

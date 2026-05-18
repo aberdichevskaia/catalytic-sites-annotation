@@ -58,9 +58,9 @@ from isoform_pipeline_utils import (
 )
 
 # ---------------- ScanNet_Ub in sys.path ----------------
-PROJECT_ROOT = os.environ.get("SCANNET_PROJECT_ROOT")
-if PROJECT_ROOT and PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+SCANNET_ROOT = os.environ.get("SCANNET_ROOT", "")
+if SCANNET_ROOT and SCANNET_ROOT not in sys.path:
+    sys.path.insert(0, SCANNET_ROOT)
 
 import predict_bindingsites  # noqa: E402
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import logging
 import pandas as pd
 import sys
@@ -14,8 +15,12 @@ def check_column(df, col):
             bad[val] = types
     return bad
 
-def main(path):
-    df = pd.read_csv(path)
+def main():
+    ap = argparse.ArgumentParser(description="Check component integrity of a cross-validation dataset CSV.")
+    ap.add_argument("--table", required=True, help="Path to dataset.csv")
+    args = ap.parse_args()
+
+    df = pd.read_csv(args.table)
     required = {'Cluster_1','Cluster_2','Component_ID','Set_Type'}
     if not required.issubset(df.columns):
         print("Missing required columns:", required - set(df.columns))
@@ -37,5 +42,5 @@ def main(path):
     else:
         logging.warning("Violations found. Fix the distribution of the listed values.")
 
-table_path = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/weight_based_v5/dataset.csv"
-main(table_path)
+if __name__ == "__main__":
+    main()

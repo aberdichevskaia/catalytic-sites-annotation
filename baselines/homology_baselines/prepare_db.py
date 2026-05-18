@@ -2,6 +2,7 @@ import os
 import json
 import csv
 import logging
+import argparse
 from collections import defaultdict
 from multiprocessing import Pool, cpu_count
 
@@ -19,17 +20,12 @@ from biotite.sequence import ProteinSequence
 from biotite.sequence.align import align_optimal, SubstitutionMatrix
 
 
-# ---------------- Paths & constants ----------------
-ANNOTATION_DIR = "/home/iscb/wolfson/annab4/DB/all_proteins/cross_validation_chem/weight_based_v9"
-DATASET_CSV = os.path.join(ANNOTATION_DIR, "dataset.csv")
-PDB_DIR = "/home/iscb/wolfson/annab4/Data/PDB_files"
-SAVE_DIR = "/home/iscb/wolfson/annab4/DB/all_proteins/structural_homology"
-SAVE_FILE = os.path.join(SAVE_DIR, "3Di_DB_splits.json")
-os.makedirs(SAVE_DIR, exist_ok=True)
-os.makedirs(PDB_DIR, exist_ok=True)
-
 SPLIT_FILES = [f"split{i}.txt" for i in range(1, 6)]
 THREADS = min(128, cpu_count())
+
+# These are set at runtime by main() before the worker pool is spawned.
+PDB_DIR = ""
+ANNOTATION_DIR = ""
 
 # 3Di minimal length (earlier code used 50; keep permissive but adjustable)
 MIN_3DI_LEN = 6
@@ -244,9 +240,9 @@ def process_split(split_path, weights):
             if len(debug_examples[status]) < 5:
                 debug_examples[status].append((payload, info))
 
-    print(f"[SPLIT] {os.path.basename(split_path)}: "
-          f"processed={len(processed)}; " +
-          ", ".join(f"{k}:{v}" for k, v in skip_counts.items() if k != "processed"))
+    logging.info("[SPLIT] %s: processed=%s; %s",
+                 os.path.basename(split_path), len(processed),
+                 ", ".join(f"{k}:{v}" for k, v in skip_counts.items() if k != "processed"))
 
     # Assemble split dict
     db_ids = []
@@ -283,28 +279,53 @@ def process_split(split_path, weights):
     for st, exs in debug_examples.items():
         if st == "processed":
             continue
-        print(f"  [debug:{st}] examples (up to 5):")
+        logging.debug("[debug:%s] examples (up to 5):", st)
         for ex_payload, info in exs:
             key = ex_payload if isinstance(ex_payload, tuple) else ex_payload.get("id")
-            print(f"    {key} -> {info}")
+            logging.debug("    %s -> %s", key, info)
 
     return split_dict
 
 
 def main():
-    weights = load_structure_weights(DATASET_CSV)
+    ap = argparse.ArgumentParser(description="Build 3Di structural homology database from split annotation files.")
+    ap.add_argument("--annotation_dir", required=True,
+                    help="Directory containing split1.txt..split5.txt and dataset.csv")
+    ap.add_argument("--pdb_dir", required=True,
+                    help="Directory for downloaded/cached PDB/CIF files")
+    ap.add_argument("--save_dir", required=True,
+                    help="Output directory for the resulting JSON database file")
+    ap.add_argument("--save_file", default=None,
+                    help="Output JSON filename (default: <save_dir>/3Di_DB_splits.json)")
+    args = ap.parse_args()
+
+    annotation_dir = args.annotation_dir
+    pdb_dir = args.pdb_dir
+    save_dir = args.save_dir
+    save_file = args.save_file or os.path.join(save_dir, "3Di_DB_splits.json")
+    dataset_csv = os.path.join(annotation_dir, "dataset.csv")
+
+    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(pdb_dir, exist_ok=True)
+
+    # Make pdb_dir and annotation_dir available to worker functions via module-level names
+    global PDB_DIR, ANNOTATION_DIR
+    PDB_DIR = pdb_dir
+    ANNOTATION_DIR = annotation_dir
+
+    weights = load_structure_weights(dataset_csv)
     all_splits = {}
 
     for i, split_file in enumerate(SPLIT_FILES, start=1):
         split_name = f"split{i}"
-        split_path = os.path.join(ANNOTATION_DIR, split_file)
+        split_path = os.path.join(annotation_dir, split_file)
         print(f"=== Processing {split_name} ===")
         split_dict = process_split(split_path, weights)
         all_splits[split_name] = split_dict
 
-    with open(SAVE_FILE, "w") as f:
+    with open(save_file, "w") as f:
         json.dump(all_splits, f)
-    logging.info("saved -> %s", SAVE_FILE)
+    logging.info("saved -> %s", save_file)
 
 
 if __name__ == "__main__":
