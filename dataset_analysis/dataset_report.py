@@ -105,6 +105,16 @@ CHEMOTYPE_LABELS: Dict[int, str] = {
     7: "Class 7 (other/none)",
 }
 
+EC_TOP_LABELS: Dict[int, str] = {
+    1: "EC 1: Oxidoreductases",
+    2: "EC 2: Transferases",
+    3: "EC 3: Hydrolases",
+    4: "EC 4: Lyases",
+    5: "EC 5: Isomerases",
+    6: "EC 6: Ligases",
+    7: "EC 7: Translocases",
+}
+
 
 # ------------------------- IO helpers -------------------------
 
@@ -129,6 +139,37 @@ def load_dataset_csv(dataset_csv: str) -> pd.DataFrame:
     df = df.drop_duplicates(subset=["Sequence_ID"]).copy()
     df["Sequence_ID"] = df["Sequence_ID"].astype(str)
     return df
+
+
+def parse_ec_top_level(ec_number: object) -> Optional[int]:
+    """
+    Extract top-level EC class (1..7) from EC_number field.
+    Accepts strings like '1.1.1.1', 'EC:1.1.1.1', or multiple ECs separated by ';' ',' '|'.
+    Returns None if not parsed.
+    """
+    if ec_number is None or (isinstance(ec_number, float) and np.isnan(ec_number)):
+        return None
+
+    s = str(ec_number).strip()
+    if not s or s.lower() in {"nan", "none", "null", "-"}:
+        return None
+
+    # Try to find a leading EC class digit 1..7 before a dot
+    # Works for e.g. "1.1.1.1" or "EC:1.1.1.1" or "1.1.1.-"
+    m = re.search(r"\b([1-7])\s*\.", s)
+    if m:
+        return int(m.group(1))
+
+    # If multiple ECs exist, try split and re-parse
+    for part in re.split(r"[;,|]\s*", s):
+        part = part.strip()
+        if not part:
+            continue
+        m2 = re.search(r"\b([1-7])\s*\.", part)
+        if m2:
+            return int(m2.group(1))
+
+    return None
 
 
 # ------------------------- Parsing labels -------------------------
@@ -489,7 +530,7 @@ def plot_chemotype_by_split_stacked(
     #ax.legend(frameon=False, loc="center left", bbox_to_anchor=(1.02, 0.5))
     #fig.tight_layout(rect=[0, 0, 0.82, 1])
     fig.tight_layout()
-    fig.savefig(out_svg, dpi=300, format="svg")
+    fig.savefig(out_svg, dpi=1000, format="png")
     plt.close(fig)
 
 def save_chemotype_legend(out_svg: str, fontsize: int = 10) -> None:
@@ -502,8 +543,115 @@ def save_chemotype_legend(out_svg: str, fontsize: int = 10) -> None:
     fig = plt.figure(figsize=(W_THIRD, H_SMALL))  # размер не важен: мы tight-crop'нем
     fig.legend(handles=handles, loc="center left", frameon=False)
 
-    fig.savefig(out_svg, dpi=300, format="svg", bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(out_svg, dpi=1000, format="png", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
+
+
+#-----------ploting: EC top-level------------------
+
+def plot_ec_top_level_pie(
+    per_chain: pd.DataFrame,
+    out_svg: str,
+) -> None:
+    """
+    Pie chart: top-level EC distribution (1..7), percentages only (no labels/legend).
+    Uses Paired colormap. Figure size: (W_HALF, H_SMALL).
+    """
+    if "EC_number" not in per_chain.columns:
+        raise KeyError("per_chain is missing column 'EC_number' (expected from dataset.csv)")
+
+    ec_cls = per_chain["EC_number"].map(parse_ec_top_level)
+    df = per_chain.copy()
+    df["ec_top"] = ec_cls
+
+    n_unknown = int(df["ec_top"].isna().sum())
+    df = df[df["ec_top"].notna()].copy()
+    if df.empty:
+        print("[WARN] No parsable EC classes found. Skip EC pie chart.")
+        return
+
+    counts = (
+        df.groupby("ec_top")["Sequence_ID"]
+        .nunique()
+        .reindex(list(range(1, 8)), fill_value=0)
+        .astype(int)
+    )
+
+    # Drop classes with 0 to avoid empty wedges
+    counts = counts[counts > 0]
+    values = counts.to_numpy(dtype=float)
+    classes = counts.index.to_list()
+
+    cmap = matplotlib.colormaps.get("Paired")
+    colors = [cmap(i - 1) for i in classes]  # map EC 1..7 -> Paired[0..6]
+
+    fracs = values / max(values.sum(), 1.0) * 100.0
+    explode = [0.06 if p < 2.0 else (0.04 if p < 4.0 else 0.0) for p in fracs]
+
+    def autopct_fmt(pct: float) -> str:
+        return f"{pct:.1f}%" if pct >= 10.0 else ""
+
+    fig, ax = plt.subplots(figsize=(W_HALF, H_SMALL))
+    ax.pie(
+        values,
+        colors=colors,
+        startangle=110,
+        counterclock=False,
+        labels=None,
+        autopct=autopct_fmt,
+        pctdistance=1.18,
+        explode=explode,
+        wedgeprops={"linewidth": 0.6, "edgecolor": "white"},
+        textprops={"fontsize": matplotlib.rcParams["font.size"]},
+    )
+    ax.set(aspect="equal")
+
+    # Keep enough room for outside percentages (avoid clipping) while preserving fixed figsize
+    ax.set_xlim(-1.35, 1.35)
+    ax.set_ylim(-1.25, 1.25)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
+
+    fig.savefig(out_svg, dpi=1000, format="png")
+    plt.close(fig)
+
+    if n_unknown > 0:
+        print(f"[WARN] EC pie: {n_unknown} chains had unparsed EC_number and were excluded.")
+
+
+def save_ec_top_level_legend(out_svg: str) -> None:
+    """Save a standalone legend for EC top-level classes (Paired colormap)."""
+    cmap = matplotlib.colormaps.get("Paired")
+    handles = [
+        Patch(facecolor=cmap(i - 1), edgecolor="none", label=EC_TOP_LABELS[i])
+        for i in range(1, 8)
+    ]
+
+    fig = plt.figure(figsize=(W_THIRD, H_SMALL))
+    fig.legend(handles=handles, loc="center left", frameon=False)
+
+    fig.savefig(out_svg, dpi=1000, format="png", bbox_inches="tight", pad_inches=0.02)
+    plt.close(fig)
+
+
+def save_ec_top_level_counts_csv(per_chain: pd.DataFrame, out_csv: str) -> None:
+    """Save EC top-level counts (% of chains) as a CSV."""
+    ec_cls = per_chain["EC_number"].map(parse_ec_top_level)
+    df = per_chain.copy()
+    df["ec_top"] = ec_cls
+
+    total = int(df["Sequence_ID"].nunique())
+    known = df[df["ec_top"].notna()].copy()
+    counts = (
+        known.groupby("ec_top")["Sequence_ID"]
+        .nunique()
+        .reindex(list(range(1, 8)), fill_value=0)
+        .astype(int)
+        .reset_index()
+        .rename(columns={"ec_top": "ec_class", "Sequence_ID": "n_chains"})
+    )
+    counts["pct_chains"] = 100.0 * counts["n_chains"] / max(total, 1)
+    counts["ec_name"] = counts["ec_class"].map(EC_TOP_LABELS)
+    counts.to_csv(out_csv, index=False)
 
 
 
@@ -729,6 +877,21 @@ def cmd_overview(args: argparse.Namespace) -> None:
     )
     print("[OK] Wrote catalytic-per-protein plots")
 
+    # EC top-level distribution (pie + standalone legend)
+    plot_ec_top_level_pie(
+        per_chain,
+        out_svg=os.path.join(args.out_dir, "ec_top_level_pie.png"),
+    )
+    save_ec_top_level_legend(
+        os.path.join(args.out_dir, "ec_top_level_legend.png")
+    )
+    save_ec_top_level_counts_csv(
+        per_chain,
+        out_csv=os.path.join(args.out_dir, "ec_top_level_counts.csv"),
+    )
+    print("[OK] Wrote EC top-level pie + legend")
+
+
 
 def cmd_chem(args: argparse.Namespace) -> None:
     ensure_dir(args.out_dir)
@@ -779,7 +942,7 @@ def cmd_chem(args: argparse.Namespace) -> None:
         class_order=class_order,
         value_col="weight_sum",
         normalize=False,
-        out_svg=os.path.join(args.out_dir, "chemotype_by_split_weight_raw.svg"),
+        out_svg=os.path.join(args.out_dir, "chemotype_by_split_weight_raw.png"),
         title=f"Chemical class distribution across CV splits (raw {args.weight_col})",
         ylabel=args.weight_col,
     )
@@ -791,12 +954,12 @@ def cmd_chem(args: argparse.Namespace) -> None:
         class_order=class_order,
         value_col="weight_sum",
         normalize=True,
-        out_svg=os.path.join(args.out_dir, "chemotype_by_split_weight_norm.svg"),
+        out_svg=os.path.join(args.out_dir, "chemotype_by_split_weight_norm.png"),
         title=f"Chemical class distribution across CV splits (normalized by {args.weight_col})",
         ylabel="Fraction of split",
     )
 
-    save_chemotype_legend(os.path.join(args.out_dir, "chemotype_legend.svg"), fontsize=10)
+    save_chemotype_legend(os.path.join(args.out_dir, "chemotype_legend.png"), fontsize=10)
 
     print("[OK] Wrote chemotype plots (raw + normalized)")
 

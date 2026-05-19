@@ -19,7 +19,7 @@ Output CSV: columns [base id, score]
 
 import os
 import argparse
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -252,19 +252,17 @@ def score_one_base(task):
     return base_id, float(np.max(spread)) if spread.size else 0.0
 
 
-def main():
-    ap = argparse.ArgumentParser(description="CPU stage: compute base_id spread scores from one dumped NPZ.")
-    ap.add_argument("--dump_npz", required=True, help="NPZ produced by GPU stage (one file).")
-    ap.add_argument("--out_csv", required=True)
-    ap.add_argument("--nproc", type=int, default=16)
-    ap.add_argument("--min_isoforms", type=int, default=2)
-    ap.add_argument("--maxtasksperchild", type=int, default=50)
-    ap.add_argument("--seq_cache_csv", default=None, help="Optional: save loaded sequences to CSV for reuse/debug.")
-    args = ap.parse_args()
-
+def run_stage(
+    dump_npz: str,
+    out_csv: str,
+    nproc: int = 16,
+    min_isoforms: int = 2,
+    maxtasksperchild: int = 50,
+    seq_cache_csv: Optional[str] = None,
+) -> pd.DataFrame:
     global ISOFORM_IDS, BASE_IDS, PDB_PATHS, OFFSETS, PROB_CONCAT, ISO_TO_IDX, SEQ_MAP
 
-    d = np.load(args.dump_npz, allow_pickle=False)
+    d = np.load(dump_npz, allow_pickle=False)
     ISOFORM_IDS = d["isoform_ids"].astype(str)
     BASE_IDS = d["base_ids"].astype(str)
     PDB_PATHS = d["pdb_paths"].astype(str)
@@ -298,14 +296,14 @@ def main():
     base_groups: List[Tuple[str, List[str]]] = []
     for base_id, g in df.groupby("base_id"):
         iso_ids = sorted(g["isoform_id"].astype(str).unique().tolist())
-        if len(iso_ids) >= args.min_isoforms:
+        if len(iso_ids) >= min_isoforms:
             base_groups.append((str(base_id), iso_ids))
 
     print(f"[INFO] base groups to process: {len(base_groups)}", flush=True)
 
     # Optional: save seq cache
-    if args.seq_cache_csv:
-        outp = args.seq_cache_csv
+    if seq_cache_csv:
+        outp = seq_cache_csv
         os.makedirs(os.path.dirname(outp) or ".", exist_ok=True)
         pd.DataFrame(
             {"isoform_id": list(SEQ_MAP.keys()), "seq": list(SEQ_MAP.values())}
@@ -321,14 +319,35 @@ def main():
     rows = []
     PoolCls = (ctx.Pool if ctx is not None else Pool)
 
-    with PoolCls(processes=args.nproc, maxtasksperchild=args.maxtasksperchild) as pool:
+    with PoolCls(processes=nproc, maxtasksperchild=maxtasksperchild) as pool:
         for base_id, score in pool.imap_unordered(score_one_base, base_groups, chunksize=1):
             rows.append({"base id": base_id, "score": score})
 
     out_df = pd.DataFrame(rows).sort_values("score", ascending=False)
-    os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
-    out_df.to_csv(args.out_csv, index=False)
-    print(f"[OK] wrote {len(out_df)} rows -> {args.out_csv}", flush=True)
+    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
+    out_df.to_csv(out_csv, index=False)
+    print(f"[OK] wrote {len(out_df)} rows -> {out_csv}", flush=True)
+    return out_df
+
+
+def main():
+    ap = argparse.ArgumentParser(description="CPU stage: compute base_id spread scores from one dumped NPZ.")
+    ap.add_argument("--dump_npz", required=True, help="NPZ produced by GPU stage (one file).")
+    ap.add_argument("--out_csv", required=True)
+    ap.add_argument("--nproc", type=int, default=16)
+    ap.add_argument("--min_isoforms", type=int, default=2)
+    ap.add_argument("--maxtasksperchild", type=int, default=50)
+    ap.add_argument("--seq_cache_csv", default=None, help="Optional: save loaded sequences to CSV for reuse/debug.")
+    args = ap.parse_args()
+
+    run_stage(
+        dump_npz=args.dump_npz,
+        out_csv=args.out_csv,
+        nproc=args.nproc,
+        min_isoforms=args.min_isoforms,
+        maxtasksperchild=args.maxtasksperchild,
+        seq_cache_csv=args.seq_cache_csv,
+    )
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ OUT_DIR="/home/iscb/wolfson/annab4/catalytic-sites-annotation/dataset_analysis/n
 WEIGHT_COL="W_Structure"
 STRICT_LABELS="0"   # 1 -> crash if missing labels; 0 -> warn + drop for label-dependent reports
 
-python3 /home/iscb/wolfson/annab4/catalytic-sites-annotation/dataset_analysis/clean_script/dataset_report.py all \
+python3 /home/iscb/wolfson/annab4/catalytic-sites-annotation/dataset_analysis/dataset_report.py all \
   --dataset_csv "${DATASET_CSV}" \
   --labels_dir "${LABELS_DIR}" \
   --out_dir "${OUT_DIR}" \
