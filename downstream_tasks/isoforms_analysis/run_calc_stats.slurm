@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=rank_isoforms_part2
-#SBATCH --output=output_rank_isoforms_part2.txt  
-#SBATCH --error=error_rank_isoforms_part2.txt
+#SBATCH --job-name=calc_isoforms_stats
+#SBATCH --output=output_calc_isoforms_stats.txt
+#SBATCH --error=error_calc_isoforms_stats.txt
 #SBATCH --partition=cpu-killable
 #SBATCH --ntasks=1               
 #SBATCH --cpus-per-task=64

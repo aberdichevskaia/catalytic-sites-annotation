@@ -9,8 +9,12 @@ Clean up an A3M/FASTA MSA:
 """
 
 import argparse
+import logging
 import re
 from typing import Iterable, Tuple
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+log = logging.getLogger(__name__)
 
 
 def read_fasta(path: str) -> Iterable[Tuple[str, str]]:
@@ -59,14 +63,14 @@ def main() -> None:
         raise SystemExit("No sequences found in input.")
 
     lengths = {len(seq) for _, seq in cleaned}
-    print(f"[INFO] unique lengths after cleanup: {sorted(lengths)[:10]} (total {len(lengths)})")
+    log.info("unique lengths after cleanup: %s (total %s)", sorted(lengths)[:10], len(lengths))
 
     query_len = len(cleaned[0][1])
     filtered = [(h, s) for h, s in cleaned if len(s) == query_len]
-    print(f"[INFO] keeping {len(filtered)}/{len(cleaned)} sequences with length == {query_len}")
+    log.info("keeping %s/%s sequences with length == %s", len(filtered), len(cleaned), query_len)
 
     write_fasta(args.out_fasta, filtered)
-    print(f"[OK] wrote {args.out_fasta}")
+    log.info("wrote %s", args.out_fasta)
 
 
 if __name__ == "__main__":
