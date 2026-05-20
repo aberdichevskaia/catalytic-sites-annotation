@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -13,18 +12,32 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Group isoforms by base protein id and write per-protein txt files "
-            "containing absolute paths to PDB structures."
+            "containing absolute paths to PDB structures.\n\n"
+            "Input modes (mutually exclusive):\n"
+            "  --csv        CSV with isoform IDs (one row per isoform).\n"
+            "  --base-ids-txt  Plain text file with base IDs (one per line). "
+            "All matching PDBs in --pdb-dir are included automatically."
         )
     )
-    p.add_argument(
+
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument(
         "--csv",
-        required=True,
+        default=None,
         help="Path to CSV with isoform IDs.",
     )
+    src.add_argument(
+        "--base-ids-txt",
+        default=None,
+        metavar="FILE",
+        help="Plain text file with base IDs (one per line, # lines ignored). "
+             "All <base_id>-*.pdb files found in --pdb-dir are included.",
+    )
+
     p.add_argument(
         "--column",
         default="protein id (uniprot / PDB)",
-        help="Column name containing isoform IDs.",
+        help="Column name containing isoform IDs (used with --csv; default: 'protein id (uniprot / PDB)').",
     )
     p.add_argument(
         "--pdb-dir",
@@ -64,20 +77,11 @@ def base_id_from_isoform(isoform_id: str) -> str:
     return s.split("-", 1)[0]
 
 
-def main() -> int:
-    args = parse_args()
-
+def _groups_from_csv(args) -> dict[str, list[str]]:
     csv_path = Path(args.csv)
-    pdb_dir = Path(args.pdb_dir)
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     if not csv_path.exists():
         print(f"ERROR: CSV not found: {csv_path}", file=sys.stderr)
-        return 2
-    if not pdb_dir.exists():
-        print(f"ERROR: PDB dir not found: {pdb_dir}", file=sys.stderr)
-        return 2
+        raise SystemExit(2)
 
     df = pd.read_csv(csv_path)
     if args.column not in df.columns:
@@ -86,24 +90,61 @@ def main() -> int:
             f"Available columns: {list(df.columns)}",
             file=sys.stderr,
         )
-        return 2
+        raise SystemExit(2)
 
-    # Collect isoform IDs
     isoform_ids = (
-        df[args.column]
-        .dropna()
-        .astype(str)
-        .map(str.strip)
+        df[args.column].dropna().astype(str).map(str.strip)
     )
     isoform_ids = isoform_ids[isoform_ids != ""].unique().tolist()
 
-    # Group by base id
     groups: dict[str, list[str]] = {}
     for iso_id in isoform_ids:
         b = base_id_from_isoform(iso_id)
-        if not b:
-            continue
-        groups.setdefault(b, []).append(iso_id)
+        if b:
+            groups.setdefault(b, []).append(iso_id)
+    return groups
+
+
+def _groups_from_base_ids_txt(args) -> dict[str, list[str]]:
+    txt_path = Path(args.base_ids_txt)
+    if not txt_path.exists():
+        print(f"ERROR: base-ids-txt not found: {txt_path}", file=sys.stderr)
+        raise SystemExit(2)
+
+    pdb_dir = Path(args.pdb_dir)
+    groups: dict[str, list[str]] = {}
+
+    with txt_path.open(encoding="utf-8") as f:
+        for line in f:
+            base_id = line.strip()
+            if not base_id or base_id.startswith("#"):
+                continue
+            # Glob all matching isoform PDBs
+            matched = sorted(pdb_dir.glob(f"{base_id}-*{args.suffix}"))
+            iso_ids = [p.stem for p in matched]  # stem = O00555-3 (no suffix)
+            if iso_ids:
+                groups[base_id] = iso_ids
+            else:
+                print(f"WARN: no PDBs for base_id={base_id}", file=sys.stderr)
+
+    return groups
+
+
+def main() -> int:
+    args = parse_args()
+
+    pdb_dir = Path(args.pdb_dir)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not pdb_dir.exists():
+        print(f"ERROR: PDB dir not found: {pdb_dir}", file=sys.stderr)
+        return 2
+
+    if args.csv is not None:
+        groups = _groups_from_csv(args)
+    else:
+        groups = _groups_from_base_ids_txt(args)
 
     # Write group files
     written = 0
@@ -160,7 +201,10 @@ def main() -> int:
         pd.DataFrame(index_rows).to_csv(index_path, sep="\t", index=False)
 
     print("=== Done ===")
-    print(f"Input CSV: {csv_path}")
+    if args.csv is not None:
+        print(f"Input CSV: {args.csv}")
+    else:
+        print(f"Input base-ids-txt: {args.base_ids_txt}")
     print(f"PDB dir: {pdb_dir}")
     print(f"Output dir: {out_dir}")
     print(f"Groups written: {written}")

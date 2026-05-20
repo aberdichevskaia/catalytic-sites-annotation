@@ -129,16 +129,25 @@ def plot_bar_loss_categories(per_iso: pd.DataFrame, out_path: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--per_base_meta", required=True, help="Path to per_base_meta.csv")
-    ap.add_argument("--per_isoform", required=True, help="Path to per_isoform_loss_categories.csv")
+    ap.add_argument("--analysis_csv", required=True,
+                    help="CSV produced by analyse_npz.py (one row per isoform).")
     ap.add_argument("--out_dir", required=True, help="Output directory for plots")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    base_meta = pd.read_csv(args.per_base_meta)
-    per_iso = pd.read_csv(args.per_isoform)
+    df = pd.read_csv(args.analysis_csv)
+
+    # Derive per-base metadata: count all isoforms (reference included) per base_id.
+    base_meta = (
+        df.groupby("base_id")
+        .size()
+        .reset_index(name="n_isoforms")
+    )
+
+    # Loss categories: exclude the reference isoform row (not a "compared" isoform).
+    per_iso = df[df["category"] != "reference"].copy()
 
     plot_hist_isoforms_per_base(base_meta, out_dir / "hist_isoforms_per_base_cap10")
     plot_bar_loss_categories(per_iso, out_dir / "bar_isoform_loss_categories_tau035")

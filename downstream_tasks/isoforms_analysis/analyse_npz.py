@@ -382,7 +382,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="CPU stage: compute diff_score + loss categories from isoform NPZ."
     )
-    ap.add_argument("--dump_npz",        required=True, help="NPZ from rank_isoforms_part1.py.")
+    ap.add_argument("--dump_npz",        required=True, help="NPZ from run_inference.py.")
     ap.add_argument("--out_csv",         required=True, help="Output CSV path.")
     ap.add_argument("--tau",             type=float, default=0.35,
                     help="Threshold for retained/lost_aligned/lost_missing (default 0.35).")

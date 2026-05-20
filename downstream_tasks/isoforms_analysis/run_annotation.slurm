@@ -11,12 +11,12 @@
 #SBATCH --mail-user=annab4@mail.tau.ac.il
 
 # CPU-only postprocessing: NPZ -> annotated CSV.
-# Run rank_isoforms_part1.py (GPU) first to produce the NPZ.
+# Run run_inference.py (GPU) first to produce the NPZ.
 
 source /home/iscb/wolfson/annab4/miniconda3/etc/profile.d/conda.sh
 conda activate struct_bio
 
-PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/predict.py \
+PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/annotate_isoforms.py \
   --dump_npz      /home/iscb/wolfson/annab4/outputs/isoforms_preds_esm2.npz \
   --meta_json     /home/iscb/wolfson/annab4/DB/all_proteins/isoform_meta.json \
   --thresholds    0.35 0.65 0.85 \

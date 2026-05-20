@@ -4,11 +4,11 @@
 """
 Postprocessing: annotate NPZ predictions with metadata and apply thresholds.
 
-Reads the NPZ produced by rank_isoforms_part1.py (GPU stage) and writes a
+Reads the NPZ produced by run_inference.py (GPU stage) and writes a
 human-readable CSV.  No inference is performed here.
 
 Input:
-  --dump_npz    NPZ produced by rank_isoforms_part1.py
+  --dump_npz    NPZ produced by run_inference.py
   --meta_json   Optional JSON with names/genes/EC/active sites
   --thresholds  One or more probability thresholds (default: 0.35 0.65 0.85)
   --out_csv     Output CSV path
@@ -134,7 +134,7 @@ def main() -> None:
         description="Annotate isoform NPZ predictions with metadata → CSV."
     )
     ap.add_argument("--dump_npz", required=True,
-                    help="NPZ produced by rank_isoforms_part1.py.")
+                    help="NPZ produced by run_inference.py.")
     ap.add_argument("--meta_json", default=None,
                     help="JSON with names/genes/EC/active sites (optional).")
     ap.add_argument("--thresholds", nargs="+", type=float,

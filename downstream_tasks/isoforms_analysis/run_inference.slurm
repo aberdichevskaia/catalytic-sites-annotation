@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=rank_isoforms_predictions_part1
-#SBATCH --output=output_rank_isoforms_predictions_part1.txt  
-#SBATCH --error=error_rank_isoforms_predictions_part1.txt
+#SBATCH --job-name=isoforms_inference
+#SBATCH --output=output_isoforms_inference.txt
+#SBATCH --error=error_isoforms_inference.txt
 #SBATCH --partition=killable
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1               
@@ -16,7 +16,7 @@ export KERAS_BACKEND=jax
 conda activate scannet_keras3
 export SCANNET_PROJECT_ROOT=/home/iscb/wolfson/annab4/main_scannet/ScanNet_Ub
 
-PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/rank_isoforms_part1.py \
+PYTHONUNBUFFERED=1 python -u /home/iscb/wolfson/annab4/catalytic-sites-annotation/downstream_tasks/isoforms_analysis/run_inference.py \
   --structures_dir /home/iscb/wolfson/annab4/Data/PDB_Human_Isoforms \
   --esm2_dir       /home/iscb/wolfson/annab4/Data/Human_Isoforms_ESM2_150M_layer30 \
   --out_npz        /home/iscb/wolfson/annab4/outputs/isoforms_preds_esm2.npz \
