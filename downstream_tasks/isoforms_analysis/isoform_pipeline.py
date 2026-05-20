@@ -12,10 +12,14 @@ End-to-end isoform pipeline:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from typing import Optional
 
 import pandas as pd
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+log = logging.getLogger(__name__)
 
 from rank_isoforms_part1 import run_stage as run_gpu_stage
 from rank_isoforms_part2 import run_stage as run_cpu_stage
@@ -90,10 +94,10 @@ def run_pipeline(
         )
         merged.drop(columns=["base id"], inplace=True, errors="ignore")
         merged.to_csv(summary_csv, index=False)
-        print(f"[OK] wrote summary -> {summary_csv}", flush=True)
+        log.info("wrote summary -> %s", summary_csv)
     else:
         scores_rank.to_csv(summary_csv, index=False)
-        print(f"[OK] wrote summary (scores only) -> {summary_csv}", flush=True)
+        log.info("wrote summary (scores only) -> %s", summary_csv)
 
 
 def main() -> None:

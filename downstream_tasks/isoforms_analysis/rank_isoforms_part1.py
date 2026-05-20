@@ -14,17 +14,18 @@ Outputs:
   - (optional) manifest_csv: a small CSV with isoform_id/base_id/path/mode/length
 
 NPZ fields:
-  - isoform_ids: (N,) unicode
-  - base_ids:    (N,) unicode
-  - pdb_paths:   (N,) unicode
-  - mode:        (N,) uint8  (2=ESM2, 0=noMSA)
-  - inference_type: (N,) unicode ("esm2" or "nomsa")
-  - lengths:     (N,) int32
-  - offsets:     (N+1,) int64, offsets[i]:offsets[i+1] slice into prob_concat
-  - prob_concat: (sum(lengths),) float16 (values < min_prob set to 0)
-  - min_prob:    float32
-  - esm2_dir:    unicode (saved for provenance)
-  - structures_dir: unicode (saved for provenance)
+  - isoform_ids:   (N,) unicode
+  - base_ids:      (N,) unicode
+  - pdb_paths:     (N,) unicode
+  - mode:          (N,) uint8  (2=ESM2, 0=noMSA)
+  - inference_type:(N,) unicode ("esm2" or "nomsa")
+  - lengths:       (N,) int32
+  - offsets:       (N+1,) int64, offsets[i]:offsets[i+1] slice into prob_concat / resids_concat
+  - prob_concat:   (sum(lengths),) float16 (values < min_prob set to 0)
+  - resids_concat: (sum(lengths),) int32  (1-based PDB residue numbers)
+  - min_prob:      float32
+  - esm2_dir:      unicode (saved for provenance)
+  - structures_dir:unicode (saved for provenance)
 """
 
 # ---------- Thread limits: must be set BEFORE importing numpy/keras/tf ----------
@@ -70,16 +71,30 @@ def base_id_from_isoform(iso_id: str) -> str:
     return iso_id.split("-", 1)[0].upper()
 
 
+def _make_esm2_pipeline(esm2_dir: str):
+    homology_search = getattr(predict_bindingsites, "homology_search", "mmseqs")
+    return predict_bindingsites.pipelines.ScanNetPipeline(
+        with_aa=True,
+        with_atom=True,
+        aa_features="esm2",
+        atom_features="valency",
+        aa_frames="triplet_sidechain",
+        Beff=500,
+        homology_search=homology_search,
+        esm2_dir=esm2_dir,
+    )
+
+
 def run_cv_catalytic_inference(
     struct_paths: List[str],
     entry_names: List[str],
     mode: str,
     ncores: int,
     esm2_dir: Optional[str],
-) -> Dict[str, np.ndarray]:
+) -> Tuple[Dict[str, np.ndarray], Dict[str, Optional[np.ndarray]]]:
     """
-    Run cv_catalytic inference and return name->raw_pred_array.
-    IMPORTANT: we call predict_interface_residues only a few times (twice total in this script).
+    Run cv_catalytic inference.
+    Returns (name->prob_array, name->resid_array).
     """
     if mode == "esm2":
         if not esm2_dir:
@@ -98,9 +113,9 @@ def run_cv_catalytic_inference(
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
-    _, _, preds, _, _ = predict_bindingsites.predict_interface_residues(
+    _, _, preds, resids_list, _ = predict_bindingsites.predict_interface_residues(
         query_pdbs=struct_paths,
-        query_names=entry_names,  # MUST match stem used in MSA file names
+        query_names=entry_names,
         query_chain_ids=None,
         query_sequences=None,
         pipeline=pipeline,
@@ -112,7 +127,7 @@ def run_cv_catalytic_inference(
         assembly=True,
         layer=None,
         use_MSA=use_msa,
-        overwrite_MSA=False,  # strict: do not build missing MSAs
+        overwrite_MSA=False,
         MSA_folder=msa_folder,
         Lmin=1,
         output_predictions=False,
@@ -122,21 +137,7 @@ def run_cv_catalytic_inference(
         output_format="numpy",
         ncores=ncores,
     )
-    return dict(zip(entry_names, preds))
-
-
-def _make_esm2_pipeline(esm2_dir: str):
-    homology_search = getattr(predict_bindingsites, "homology_search", "mmseqs")
-    return predict_bindingsites.pipelines.ScanNetPipeline(
-        with_aa=True,
-        with_atom=True,
-        aa_features="esm2",
-        atom_features="valency",
-        aa_frames="triplet_sidechain",
-        Beff=500,
-        homology_search=homology_search,
-        esm2_dir=esm2_dir,
-    )
+    return dict(zip(entry_names, preds)), dict(zip(entry_names, resids_list))
 
 
 def run_stage(
@@ -159,31 +160,24 @@ def run_stage(
     without_esm2 = [s for s in stems if s not in set(with_esm2)]
 
     logging.info("total structures: %s", len(stems))
-    logging.info("msa_dir: %s", msa_dir if msa_dir else "(none)")
-    if msa_dir:
-        logging.info("indexed MSA stems: %s", len(msa_stems))
-    logging.info("hybrid split: MSA=%s, noMSA=%s", len(with_msa), len(without_msa))
-
-    if msa_dir and len(with_msa) == 0:
-        # Helpful debug in case of naming mismatch
-        ex = stems[0]
-        pat = os.path.join(msa_dir, f"MSA_{ex}_*_*.fasta")
-        logging.warning("No MSAs matched. Example stem='%s'. Example pattern='%s'", ex, pat)
-        sample = glob(pat)[:3]
-        logging.warning("Example matches (first 3): %s", sample)
+    logging.info("ESM2 split: esm2=%s, nomsa=%s", len(with_esm2), len(without_esm2))
 
     preds_raw: Dict[str, np.ndarray] = {}
+    resids_raw: Dict[str, Optional[np.ndarray]] = {}
 
-    # Run inference only twice (fast)
-    if with_msa:
-        paths = [stem_to_path[s] for s in with_msa]
-        preds_raw.update(run_cv_catalytic_inference(paths, with_msa, use_msa=True, ncores=args.ncores, msa_dir=msa_dir))
-        logging.info("inferred MSA group: %s", len(with_msa))
+    if with_esm2:
+        paths = [by_stem[s] for s in with_esm2]
+        pr, rs = run_cv_catalytic_inference(paths, with_esm2, mode="esm2", ncores=ncores, esm2_dir=esm2_dir)
+        preds_raw.update(pr)
+        resids_raw.update(rs)
+        logging.info("inferred ESM2 group: %s", len(with_esm2))
 
-    if without_msa:
-        paths = [stem_to_path[s] for s in without_msa]
-        preds_raw.update(run_cv_catalytic_inference(paths, without_msa, use_msa=False, ncores=args.ncores, msa_dir=None))
-        logging.info("inferred noMSA group: %s", len(without_msa))
+    if without_esm2:
+        paths = [by_stem[s] for s in without_esm2]
+        pr, rs = run_cv_catalytic_inference(paths, without_esm2, mode="nomsa", ncores=ncores, esm2_dir=None)
+        preds_raw.update(pr)
+        resids_raw.update(rs)
+        logging.info("inferred noMSA group: %s", len(without_esm2))
 
     isoform_ids: List[str] = []
     base_ids: List[str] = []
@@ -193,6 +187,7 @@ def run_stage(
     lengths: List[int] = []
     offsets: List[int] = [0]
     prob_chunks: List[np.ndarray] = []
+    resids_chunks: List[np.ndarray] = []
 
     kept = 0
     esm2_set = set(with_esm2)
@@ -205,7 +200,13 @@ def run_stage(
         if p.size == 0:
             continue
 
-        p = np.where(p >= min_prob, p, 0.0).astype(np.float16)
+        p_stored = np.where(p >= min_prob, p, 0.0).astype(np.float16)
+
+        r = resids_raw.get(s)
+        if r is not None and len(r) == len(p):
+            resids = np.asarray(r, dtype=np.int32)
+        else:
+            resids = np.arange(1, len(p) + 1, dtype=np.int32)
 
         isoform_ids.append(s)
         base_ids.append(base_id_from_isoform(s))
@@ -218,9 +219,10 @@ def run_stage(
             modes.append(0)
             inference_types.append("nomsa")
 
-        length = int(p.shape[0])
+        length = int(p_stored.shape[0])
         lengths.append(length)
-        prob_chunks.append(p)
+        prob_chunks.append(p_stored)
+        resids_chunks.append(resids)
         offsets.append(offsets[-1] + length)
         kept += 1
 
@@ -228,6 +230,7 @@ def run_stage(
         raise SystemExit("No predictions were produced (kept=0). Check model run and inputs.")
 
     prob_concat = np.concatenate(prob_chunks, axis=0).astype(np.float16)
+    resids_concat = np.concatenate(resids_chunks, axis=0).astype(np.int32)
 
     os.makedirs(os.path.dirname(out_npz) or ".", exist_ok=True)
     np.savez_compressed(
@@ -240,17 +243,18 @@ def run_stage(
         lengths=np.array(lengths, dtype=np.int32),
         offsets=np.array(offsets, dtype=np.int64),
         prob_concat=prob_concat,
+        resids_concat=resids_concat,
         min_prob=np.float32(min_prob),
         esm2_dir=np.array(esm2_dir or "", dtype="U"),
         structures_dir=np.array(structures_dir, dtype="U"),
     )
 
-    logging.info("wrote %s isoforms into one file -> %s", kept, out_npz)
+    logging.info("wrote %s isoforms -> %s", kept, out_npz)
     logging.info("total prob elements: %s", f"{prob_concat.size:,}")
 
     if manifest_csv:
         os.makedirs(os.path.dirname(manifest_csv) or ".", exist_ok=True)
-        df = pd.DataFrame({
+        mdf = pd.DataFrame({
             "isoform_id": isoform_ids,
             "base_id": base_ids,
             "pdb_path": pdbs,
@@ -259,8 +263,30 @@ def run_stage(
             "offset_start": offsets[:-1],
             "offset_end": offsets[1:],
         })
-        df.to_csv(manifest, index=False)
-        logging.info("wrote manifest -> %s", manifest)
+        mdf.to_csv(manifest_csv, index=False)
+        logging.info("wrote manifest -> %s", manifest_csv)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="GPU stage: ESM2-first isoform inference → NPZ.")
+    ap.add_argument("--structures_dir", required=True, help="Directory with isoform PDBs/CIFs.")
+    ap.add_argument("--esm2_dir", default=None,
+                    help="Root of cached ESM2 embeddings (<root>/<stem[:2]>/<stem>.npy).")
+    ap.add_argument("--out_npz", required=True, help="Output NPZ path.")
+    ap.add_argument("--manifest_csv", default=None, help="Optional per-isoform manifest CSV.")
+    ap.add_argument("--ncores", type=int, default=8, help="Cores for predict_interface_residues.")
+    ap.add_argument("--min_prob", type=float, default=0.1,
+                    help="Zero out probabilities below this value in the NPZ.")
+    args = ap.parse_args()
+
+    run_stage(
+        structures_dir=args.structures_dir,
+        esm2_dir=args.esm2_dir,
+        out_npz=args.out_npz,
+        manifest_csv=args.manifest_csv,
+        ncores=args.ncores,
+        min_prob=args.min_prob,
+    )
 
 
 if __name__ == "__main__":
