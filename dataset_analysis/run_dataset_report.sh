@@ -12,7 +12,7 @@ LABELS_DIR="${BASE_DIR}"   # or "${BASE_DIR}/labels" if you move them
 PROTEIN_JSON="/home/iscb/wolfson/annab4/DB/all_protein_table_modified.json"
 
 # Output
-OUT_DIR="/home/iscb/wolfson/annab4/catalytic-sites-annotation/dataset_analysis/new_plots_font_path"
+OUT_DIR="/home/iscb/wolfson/annab4/catalytic-sites-annotation/dataset_analysis/plots"
 
 # Settings
 WEIGHT_COL="W_Structure"
