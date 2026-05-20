@@ -648,6 +648,7 @@ def compute_group_aucpr(
         au_roc = aucroc_chain_weighted(labels_list, preds_list, weights_list)
         lo_roc, hi_roc = bootstrap_ci_aucroc_group(labels_list, preds_list, weights_list, n_boot=n_boot, seed=seed)
 
+        prevalence = int(sub["y_true"].sum()) / len(sub)
         rows.append({
             group_col:      g,
             "AUCPR":        au_pr,
@@ -656,6 +657,7 @@ def compute_group_aucpr(
             "AUCROC":       au_roc,
             "AUCROC_ci_lo": lo_roc,
             "AUCROC_ci_hi": hi_roc,
+            "prevalence":   prevalence,
             "n_chains":     len(labels_list),
             "n_residues":   len(sub),
             "n_positive":   int(sub["y_true"].sum()),

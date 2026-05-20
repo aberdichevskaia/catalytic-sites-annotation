@@ -87,11 +87,14 @@ def multi_barplot(
     metrics_by_model: Dict[str, pd.DataFrame],
     group_col:       str,
     colors,
-    xlabels:   Optional[List[str]] = None,
-    ylabel:    str = "AUCPR",
+    xlabels:    Optional[List[str]] = None,
+    ylabel:     str = "AUCPR",
     metric_col: str = "AUCPR",
     ci_lo_col:  str = "AUCPR_ci_lo",
     ci_hi_col:  str = "AUCPR_ci_hi",
+    rotation:   int = 20,
+    ha:         str = "right",
+    legend_loc: str = "upper right",
 ) -> None:
     n     = len(model_names)
     width = 0.8 / n
@@ -116,7 +119,8 @@ def multi_barplot(
                     fmt="none", ecolor="black", capsize=2, elinewidth=0.7)
 
     ax.set_xticks(np.arange(len(groups)))
-    ax.set_xticklabels(xlabels if xlabels else [str(g) for g in groups], rotation=20, ha="right")
+    ax.set_xticklabels(xlabels if xlabels else [str(g) for g in groups],
+                       rotation=rotation, ha=ha)
     ax.set_ylabel(ylabel)
     ax.set_ylim(0, 1)
     ax.grid(True, axis="y", alpha=0.3)
@@ -135,9 +139,13 @@ def compare_by_group(
     tag:         str,
     title:       str,
     colors,
-    xlabels: Optional[List[str]] = None,
-    n_boot:  int = 200,
-    seed:    int = 0,
+    xlabels:    Optional[List[str]] = None,
+    n_boot:     int = 200,
+    seed:       int = 0,
+    height:     float = H_WIDE,
+    rotation:   int = 20,
+    ha:         str = "right",
+    legend_loc: str = "upper right",
 ) -> None:
     metrics_by_model: Dict[str, pd.DataFrame] = {}
     all_rows = []
@@ -170,24 +178,42 @@ def compare_by_group(
     xlbls = xlabels if xlabels else [str(g) for g in actual_groups]
     fig_w = max(W_FULL, len(actual_groups) * 1.2 * max(1, len(model_names) * 0.5))
 
-    for metric, ci_lo, ci_hi, ylabel, fname_suffix in (
-        ("AUCPR",  "AUCPR_ci_lo",  "AUCPR_ci_hi",  "AUCPR",   "aucpr"),
-        ("AUCROC", "AUCROC_ci_lo", "AUCROC_ci_hi",  "AUC-ROC", "aucroc"),
-    ):
-        # skip AUCROC if not present in any model's metrics
-        if not any(metric in mdf.columns for mdf in metrics_by_model.values()):
+    # compute normalized AUCPR: (AUCPR - prevalence) / (1 - prevalence)
+    norm_metrics_by_model: Dict[str, pd.DataFrame] = {}
+    for name, mdf in metrics_by_model.items():
+        if "prevalence" not in mdf.columns:
             continue
-        fig, ax = plt.subplots(figsize=(fig_w, H_WIDE))
-        multi_barplot(ax, actual_groups, model_names, metrics_by_model, group_col, colors,
+        mdf = mdf.copy()
+        p = mdf["prevalence"].clip(0, 1 - 1e-9)
+        mdf["AUCPR_norm"]       = (mdf["AUCPR"]       - p) / (1 - p)
+        mdf["AUCPR_norm_ci_lo"] = (mdf["AUCPR_ci_lo"] - p) / (1 - p)
+        mdf["AUCPR_norm_ci_hi"] = (mdf["AUCPR_ci_hi"] - p) / (1 - p)
+        norm_metrics_by_model[name] = mdf
+
+    bar_kw = dict(rotation=rotation, ha=ha, legend_loc=legend_loc)
+
+    for metric, ci_lo, ci_hi, ylabel, fname_suffix, mbm in (
+        ("AUCPR",      "AUCPR_ci_lo",      "AUCPR_ci_hi",      "AUCPR",            "aucpr",      metrics_by_model),
+        ("AUCROC",     "AUCROC_ci_lo",     "AUCROC_ci_hi",     "AUC-ROC",          "aucroc",     metrics_by_model),
+        ("AUCPR_norm", "AUCPR_norm_ci_lo", "AUCPR_norm_ci_hi", "AUCPR (normalized)", "aucpr_norm", norm_metrics_by_model),
+    ):
+        if not any(metric in mdf.columns for mdf in mbm.values()):
+            continue
+        fig, ax = plt.subplots(figsize=(fig_w, height))
+        multi_barplot(ax, actual_groups, model_names, mbm, group_col, colors,
                       xlabels=xlbls, ylabel=ylabel,
-                      metric_col=metric, ci_lo_col=ci_lo, ci_hi_col=ci_hi)
+                      metric_col=metric, ci_lo_col=ci_lo, ci_hi_col=ci_hi,
+                      **bar_kw)
+        if metric == "AUCPR_norm":
+            ax.set_ylim(-0.1, 1)  # normalized can go slightly negative
+            ax.axhline(0, color="gray", linestyle="--", linewidth=0.8, label="random")
         ax.set_title(f"{title} — {ylabel}", fontsize=11)
-        ax.legend(fontsize=7, loc="upper right")
+        ax.legend(fontsize=7, loc=legend_loc, framealpha=0.8)
         fig.tight_layout()
         fig.savefig(os.path.join(out_dir, f"{tag}_{fname_suffix}_comparison.png"), dpi=200)
         plt.close(fig)
 
-    log.info("saved %s_{aucpr,aucroc}_comparison.*", tag)
+    log.info("saved %s_{aucpr,aucroc,aucpr_norm}_comparison.*", tag)
 
 
 def _aa_heatmap(all_metrics: Dict[str, pd.DataFrame], metric_col: str,
@@ -284,16 +310,17 @@ def compare_pr_curves_by_rsa(
     plt.close(fig)
     log.info("saved pr_curves_by_rsa_bin.png")
 
-    # ── AUCPR + AUCROC barplot per RSA bin ─────────────────────────────────────
+    # ── AUCPR + AUCROC + normalized AUCPR barplot per RSA bin ─────────────────
     compare_by_group(
         model_dfs=model_dfs, model_names=model_names,
         group_col="rsa_bin", groups=RSA_LABELS,
         out_dir=out_dir, tag="rsa_bin",
-        title="AUCPR / AUC-ROC by RSA bin",
+        title="by RSA bin",
         colors=colors, xlabels=RSA_BIN_SHORT,
         n_boot=n_boot, seed=seed,
+        height=4.5, rotation=0, ha="center", legend_loc="upper left",
     )
-    log.info("saved rsa_bin_{aucpr,aucroc}_comparison.*")
+    log.info("saved rsa_bin_{aucpr,aucroc,aucpr_norm}_comparison.*")
 
 
 # ─── main ──────────────────────────────────────────────────────────────────────
