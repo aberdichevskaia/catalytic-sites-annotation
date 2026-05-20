@@ -278,6 +278,35 @@ def refine_double_relocate(components_weights, fold_weights, component_fold, n_s
     return improved_any
 
 
+def fix_ec_by_cluster_majority(protein_data, cluster_level_1, cluster_level_2):
+    """Zero out EC numbers that disagree with the majority EC class in their Cluster_2."""
+    c2_map = cluster_level_2.set_index("Centroid_ID")["Cluster_2"].to_dict()
+    seq_to_c2 = cluster_level_1.assign(Cluster_2=cluster_level_1["Cluster_1"].map(c2_map))
+
+    c2_ec_counts = defaultdict(lambda: defaultdict(int))
+    for c2, grp in seq_to_c2.groupby("Cluster_2"):
+        for seq_chain in grp["Sequence_ID"].values:
+            ec = protein_data.get(seq_chain.split("_")[0], {}).get("EC_number", "not found")
+            if ec != "not found":
+                c2_ec_counts[c2][int(ec.split(".")[0])] += 1
+
+    c2_majority = {c2: max(counts, key=counts.__getitem__) for c2, counts in c2_ec_counts.items()}
+
+    modified = 0
+    for c2, grp in seq_to_c2.groupby("Cluster_2"):
+        majority = c2_majority.get(c2)
+        if majority is None:
+            continue
+        for seq_chain in grp["Sequence_ID"].values:
+            seq_id = seq_chain.split("_")[0]
+            ec = protein_data.get(seq_id, {}).get("EC_number", "not found")
+            if ec != "not found" and int(ec.split(".")[0]) != majority:
+                protein_data[seq_id]["EC_number"] = "not found"
+                modified += 1
+
+    logging.info("EC majority fix: zeroed %s minority EC entries", modified)
+
+
 def get_parent(cid):
     return pdb_to_uniprot.get(cid.split('_')[0], cid.split('_')[0])
 
@@ -301,7 +330,7 @@ def main():
     ap = argparse.ArgumentParser(description="Build 5-fold stratified CV splits balanced by chemical class.")
     ap.add_argument("--cluster_level_1", required=True, help="Path to cluster_level_1_cluster.tsv (see config.example.yaml)")
     ap.add_argument("--cluster_level_2", required=True, help="Path to cluster_level_2_cluster.tsv (see config.example.yaml)")
-    ap.add_argument("--protein_table", required=True, help="EC-filtered protein table JSON (see config.example.yaml: protein_table_modified)")
+    ap.add_argument("--protein_table", required=True, help="Protein table JSON (see config.example.yaml: protein_table)")
     ap.add_argument("--batches_dir", required=True, help="Directory with batch*_annotations.pkl (see config.example.yaml: batches_dir)")
     ap.add_argument("--pdb_dir", required=True, help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
     ap.add_argument("--output_dir", required=True, help="Output directory for CV splits (see config.example.yaml: cv_dir)")
@@ -329,6 +358,8 @@ def main():
                                   names=['Cluster_2', 'Centroid_ID'])
     with open(protein_table_path) as f:
         protein_data = json.load(f)
+
+    fix_ec_by_cluster_majority(protein_data, cluster_level_1, cluster_level_2)
 
     pdb_counter = Counter()
     for rec in protein_data.values():
