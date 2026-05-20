@@ -8,11 +8,12 @@ For each base_id group (ref isoform + others) this script:
   1. Aligns each non-reference isoform to the reference (biotite, AA-match filter).
   2. Computes diff_score — how much the isoform diverges from the reference:
 
-       diff_score = Σ_r |p_ref(r) − p_iso_aligned(r)| / Σ_r p_ref(r)
+       diff_score = Σ_{r: aligned, AA-match} |p_ref(r) − p_iso(r)| / Σ_r p_ref(r)
 
-     where the sum is over all reference positions with p_ref > 0,
-     and p_iso_aligned(r) = 0 when the position is not aligned with AA-match.
-     Score is 0 for the reference isoform itself.
+     The numerator sums only over positions that are aligned with identical AA,
+     so deletions and mismatches do not contribute (those are captured separately
+     by lost_missing). The denominator is the total reference probability mass.
+     Score is 0 for the reference isoform itself; NaN when no aligned positions.
 
   3. Categorises each reference site (p_ref ≥ tau) as:
        retained       — aligned with AA-match and p_iso ≥ tau
@@ -252,15 +253,9 @@ def analyse_one_base(task: Tuple[str, List[str]]) -> List[Dict[str, Any]]:
         rr = ref_idx[aa_match]
         ii = iso_idx[aa_match]
 
-        # Aligned iso probabilities at ref positions (0 where not aligned)
-        p_iso_at_ref = np.zeros(L, dtype=np.float32)
-        if rr.size > 0:
-            p_iso_at_ref[rr] = p_iso[ii]
-
-        # diff_score: sum |p_ref - p_iso_aligned| over non-zero ref positions
-        nz = p_ref > 0
-        if ref_prob_sum > 0 and nz.any():
-            diff_score = float(np.abs(p_ref[nz] - p_iso_at_ref[nz]).sum() / ref_prob_sum)
+        # diff_score: only over AA-match aligned positions (deletions excluded)
+        if rr.size > 0 and ref_prob_sum > 0:
+            diff_score = float(np.abs(p_ref[rr] - p_iso[ii]).sum() / ref_prob_sum)
         else:
             diff_score = float("nan")
 
