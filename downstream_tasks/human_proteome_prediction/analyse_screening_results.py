@@ -646,6 +646,16 @@ def main() -> None:
         cleaned_path = out_dir / f"{in_path.stem}.cleaned.csv"
         cleaned.to_csv(cleaned_path, index=False)
 
+        # Filtered + sorted: only rows with at least one novel site at any threshold
+        any_novel_mask = cleaned[[ANY_NOVEL_COL_TMPL.format(thr=t) for t in THRESHOLDS]].any(axis=1)
+        novel_only = cleaned[any_novel_mask].copy()
+        sort_cols = [N_NOVEL_COL_TMPL.format(thr=t) for t in sorted(THRESHOLDS, reverse=True)
+                     if N_NOVEL_COL_TMPL.format(thr=t) in novel_only.columns]
+        if sort_cols:
+            novel_only = novel_only.sort_values(sort_cols, ascending=False)
+        novel_only_path = out_dir / f"{in_path.stem}.novel_only.csv"
+        novel_only.to_csv(novel_only_path, index=False)
+
     print("Saved outputs to:", out_dir.resolve())
 
 
