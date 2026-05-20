@@ -15,6 +15,9 @@ import networkx as nx
 from Bio.PDB import PDBList, MMCIFParser, PPBuilder
 from Bio.SeqUtils import seq1
 from Bio.Align import PairwiseAligner
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 from scipy.spatial import cKDTree
 
 import warnings
@@ -308,18 +311,55 @@ def process_batch(data_batch, batch_num, output_dir):
     except Exception as e:
         logging.error("Error saving files for batch %d: %s", batch_num, e)
 
+# ---------------------- Aggregation ----------------------
+
+def aggregate_batches(output_dir: str, num_batches: int, protein_table_path: str, fasta_path: str) -> None:
+    """Merge all batch*_table.json files into a single protein table JSON and FASTA."""
+    records = {}
+    for i in range(1, num_batches + 1):
+        path = os.path.join(output_dir, f"batch{i}_table.json")
+        if not os.path.exists(path):
+            logging.warning("batch table missing, skipping: %s", path)
+            continue
+        with open(path) as f:
+            records.update(json.load(f))
+
+    with open(protein_table_path, "w") as f:
+        json.dump(records, f)
+
+    seq_records = [
+        SeqRecord(Seq(data["uniprot_sequence"]), id=uid, description="")
+        for uid, data in records.items()
+    ]
+    with open(fasta_path, "w") as f:
+        SeqIO.write(seq_records, f, "fasta")
+
+    logging.info("Aggregated %d proteins -> %s", len(records), protein_table_path)
+    logging.info("Wrote FASTA -> %s", fasta_path)
+
+
 # ---------------------- Entry point ----------------------
+
 def main():
     global PDB_DIR
 
-    ap = argparse.ArgumentParser(description="Preprocess UniProt JSON into per-batch annotation pickles.")
+    ap = argparse.ArgumentParser(
+        description="Preprocess UniProt JSON into per-batch annotation pickles, "
+                    "then aggregate into a single protein table and FASTA."
+    )
     ap.add_argument("--input_file", required=True,
                     help="UniProt JSON export (see config.example.yaml: uniprot_file)")
     ap.add_argument("--output_dir", required=True,
-                    help="Directory to write batch pickles (see config.example.yaml: batches_dir)")
+                    help="Directory to write batch files (see config.example.yaml: batches_dir)")
     ap.add_argument("--pdb_dir", required=True,
                     help="Directory for cached PDB/AF .cif files (see config.example.yaml: pdb_dir)")
+    ap.add_argument("--protein_table", required=True,
+                    help="Output path for aggregated protein table JSON (see config.example.yaml: protein_table)")
+    ap.add_argument("--protein_fasta", required=True,
+                    help="Output path for aggregated FASTA (see config.example.yaml: protein_fasta)")
     ap.add_argument("--num_batches", type=int, default=100)
+    ap.add_argument("--skip_existing", action="store_true",
+                    help="Skip batches whose output files already exist (for rerunning after failures).")
     args = ap.parse_args()
 
     PDB_DIR = args.pdb_dir
@@ -339,12 +379,20 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     for i in range(args.num_batches):
+        annotations_file = os.path.join(args.output_dir, f"batch{i+1}_annotations.pkl")
+        table_file       = os.path.join(args.output_dir, f"batch{i+1}_table.json")
+        if args.skip_existing and os.path.exists(annotations_file) and os.path.exists(table_file):
+            logging.info("Batch %d already exists, skipping.", i + 1)
+            continue
         batch_start = i * batch_size
-        batch_end = min((i + 1) * batch_size, total)
-        data_batch = results[batch_start:batch_end]
+        batch_end   = min((i + 1) * batch_size, total)
+        data_batch  = results[batch_start:batch_end]
         logging.info("Processing batch %d: proteins %d–%d", i+1, batch_start, batch_end)
         process_batch(data_batch, i + 1, args.output_dir)
         logging.info("Batch %d done.", i+1)
+
+    aggregate_batches(args.output_dir, args.num_batches, args.protein_table, args.protein_fasta)
+
 
 if __name__ == "__main__":
     main()
