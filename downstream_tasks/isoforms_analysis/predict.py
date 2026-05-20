@@ -140,6 +140,8 @@ def main() -> None:
     ap.add_argument("--thresholds", nargs="+", type=float,
                     default=[0.35, 0.65, 0.85],
                     help="Probability thresholds for hit columns (default: 0.35 0.65 0.85).")
+    ap.add_argument("--analysis_csv", default=None,
+                    help="Optional CSV from analyse_npz.py; adds diff_score and loss columns.")
     ap.add_argument("--out_csv", required=True, help="Output CSV path.")
     args = ap.parse_args()
 
@@ -189,6 +191,22 @@ def main() -> None:
         rows.append(row)
 
     df = pd.DataFrame(rows)
+
+    if args.analysis_csv:
+        log.info("joining analysis from %s", args.analysis_csv)
+        analysis = pd.read_csv(args.analysis_csv)
+        analysis_cols = [
+            "diff_score", "n_ref_sites",
+            "retained", "lost_aligned", "lost_missing", "category",
+            "retained_pos_ref1", "lost_aligned_pos_ref1", "lost_missing_pos_ref1",
+        ]
+        keep = ["isoform"] + [c for c in analysis_cols if c in analysis.columns]
+        df = df.merge(
+            analysis[keep].rename(columns={"isoform": "protein id (uniprot / PDB)"}),
+            on="protein id (uniprot / PDB)",
+            how="left",
+        )
+
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     df.to_csv(args.out_csv, index=False)
     log.info("wrote %s rows -> %s", len(df), args.out_csv)
