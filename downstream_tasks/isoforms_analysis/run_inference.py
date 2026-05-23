@@ -71,8 +71,9 @@ def base_id_from_isoform(iso_id: str) -> str:
     return iso_id.split("-", 1)[0].upper()
 
 
-def _make_esm2_pipeline(esm2_dir: str):
+def _make_esm2_pipeline(esm2_dir: str, esm2_version: str = "esm2_t36_3B_UR50D"):
     homology_search = getattr(predict_bindingsites, "homology_search", "mmseqs")
+    esm2_embed_dim = predict_bindingsites.esm2_embed_dimensions[esm2_version]
     return predict_bindingsites.pipelines.ScanNetPipeline(
         with_aa=True,
         with_atom=True,
@@ -82,6 +83,8 @@ def _make_esm2_pipeline(esm2_dir: str):
         Beff=500,
         homology_search=homology_search,
         esm2_dir=esm2_dir,
+        esm2_version=esm2_version,
+        esm2_embed_dim=esm2_embed_dim,
     )
 
 
@@ -91,6 +94,8 @@ def run_cv_catalytic_inference(
     mode: str,
     ncores: int,
     esm2_dir: Optional[str],
+    ablation: Optional[str] = None,
+    esm2_version: str = "esm2_t36_3B_UR50D",
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, Optional[np.ndarray]]]:
     """
     Run cv_catalytic inference.
@@ -99,9 +104,13 @@ def run_cv_catalytic_inference(
     if mode == "esm2":
         if not esm2_dir:
             raise ValueError("esm2_dir is required for mode='esm2'")
-        pipeline = _make_esm2_pipeline(esm2_dir=esm2_dir)
-        model = predict_bindingsites.cv_catalytic_model_ESM2
-        model_name = predict_bindingsites.cv_catalytic_model_name_ESM2
+        pipeline = _make_esm2_pipeline(esm2_dir=esm2_dir, esm2_version=esm2_version)
+        if ablation:
+            model = predict_bindingsites.ABLATION_ESM2_MODELS[ablation]
+            model_name = f'cv_catalytic_{ablation}_ESM2'
+        else:
+            model = predict_bindingsites.cv_catalytic_model_ESM2
+            model_name = predict_bindingsites.cv_catalytic_model_name_ESM2
         use_msa = False
         msa_folder = predict_bindingsites.MSA_folder
     elif mode == "nomsa":
@@ -147,6 +156,8 @@ def run_stage(
     manifest_csv: Optional[str],
     ncores: int,
     min_prob: float,
+    ablation: Optional[str] = None,
+    esm2_version: str = "esm2_t36_3B_UR50D",
 ) -> None:
     structures_dir = ensure_trailing_slash(structures_dir)
     esm2_dir = ensure_trailing_slash(esm2_dir) if esm2_dir else None
@@ -167,7 +178,7 @@ def run_stage(
 
     if with_esm2:
         paths = [by_stem[s] for s in with_esm2]
-        pr, rs = run_cv_catalytic_inference(paths, with_esm2, mode="esm2", ncores=ncores, esm2_dir=esm2_dir)
+        pr, rs = run_cv_catalytic_inference(paths, with_esm2, mode="esm2", ncores=ncores, esm2_dir=esm2_dir, ablation=ablation, esm2_version=esm2_version)
         preds_raw.update(pr)
         resids_raw.update(rs)
         logging.info("inferred ESM2 group: %s", len(with_esm2))
@@ -204,7 +215,10 @@ def run_stage(
 
         r = resids_raw.get(s)
         if r is not None and len(r) == len(p):
-            resids = np.asarray(r, dtype=np.int32)
+            try:
+                resids = np.asarray(r, dtype=np.int32)
+            except (ValueError, TypeError):
+                resids = np.arange(1, len(p) + 1, dtype=np.int32)
         else:
             resids = np.arange(1, len(p) + 1, dtype=np.int32)
 
@@ -277,6 +291,10 @@ def main() -> None:
     ap.add_argument("--ncores", type=int, default=8, help="Cores for predict_interface_residues.")
     ap.add_argument("--min_prob", type=float, default=0.1,
                     help="Zero out probabilities below this value in the NPZ.")
+    ap.add_argument("--ablation", type=str, default=None,
+                    help="Ablation model set for ESM2 inference (e.g. ablate09).")
+    ap.add_argument("--esm2_version", type=str, default="esm2_t36_3B_UR50D",
+                    help="ESM2 model version matching the cached embeddings.")
     args = ap.parse_args()
 
     run_stage(
@@ -286,6 +304,8 @@ def main() -> None:
         manifest_csv=args.manifest_csv,
         ncores=args.ncores,
         min_prob=args.min_prob,
+        ablation=args.ablation,
+        esm2_version=args.esm2_version,
     )
 
 

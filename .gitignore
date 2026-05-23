@@ -25,4 +25,5 @@ config.yaml
 *.out
 *.index
 *.claude/*
-__pycache__/
+*__pycache__/*
+*.nfs*

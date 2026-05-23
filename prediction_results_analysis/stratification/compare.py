@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-compare.py — Compare AUCPR across multiple models from pre-built residue_table.csv files.
+compare.py — Compare metrics across multiple models using pre-computed CSVs.
+
+Loads metrics_by_{tag}.csv files written by stratify.py (no bootstrap recomputation).
+Only PR curve plotting still reads residue_table.csv.
 
 Analyses produced:
   1. PDB vs AF barplot
   2. Amino acid barplot + full AA heatmap
   3. EC top-level class barplot
   4. Chemotype barplot
-  5. PR curves per RSA bin (one sub-panel per bin)
-
-Requires: residue_table.csv in each model dir (produced by stratify.py).
+  5. PR curves per RSA bin (one sub-panel per bin) + RSA bin barplot
 
 Usage:
   python compare.py \\
     --model_dirs /path/model1 /path/model2 ... \\
     --model_names "Model A" "Model B" ... \\
-    --out_dir /path/to/comparison \\
-    [--n_boot 200] [--seed 0]
+    --out_dir /path/to/comparison
 """
 
 import argparse
@@ -35,23 +35,12 @@ import matplotlib.pyplot as plt
 
 from sklearn.metrics import precision_recall_curve, auc
 
-# ── shared utilities from stratify.py ─────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from stratify import (
-    compute_group_aucpr,
-    aucpr_like_make_PR_curve,
-    aucroc_chain_weighted,
-    bootstrap_ci_aucpr_group,
-    bootstrap_ci_aucroc_group,
-    normalize_id,
-    W_FULL, H_WIDE,
-    RSA_LABELS, AA_ORDER, CHEMOTYPE_NAMES,
-)
-
-# ─── constants ─────────────────────────────────────────────────────────────────
+from stratify_utils import normalize_id, W_FULL, H_WIDE
+from stratify import RSA_LABELS, AA_ORDER, CHEMOTYPE_NAMES
 
 RSA_BIN_SHORT = [
     "buried\n≤0.05", "partly buried\n0.05–0.2",
@@ -76,6 +65,18 @@ def load_residue_table(path: str) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def load_model_metrics(model_dirs: List[str], model_names: List[str], tag: str) -> Dict[str, pd.DataFrame]:
+    """Load metrics_by_{tag}.csv from each model dir."""
+    out: Dict[str, pd.DataFrame] = {}
+    for d, name in zip(model_dirs, model_names):
+        path = os.path.join(d, f"metrics_by_{tag}.csv")
+        if not os.path.exists(path):
+            log.warning("%s: metrics_by_%s.csv not found in %s — skipping", name, tag, d)
+            continue
+        out[name] = pd.read_csv(path)
+    return out
 
 
 # ─── multi-model grouped barplot ───────────────────────────────────────────────
@@ -106,8 +107,8 @@ def multi_barplot(
 
         idx_map  = {str(row[group_col]): row for _, row in mdf.iterrows()}
         vals = np.array([idx_map[str(g)][metric_col]  if str(g) in idx_map else np.nan for g in groups], float)
-        lo   = np.array([idx_map[str(g)][ci_lo_col]   if str(g) in idx_map else np.nan for g in groups], float)
-        hi   = np.array([idx_map[str(g)][ci_hi_col]   if str(g) in idx_map else np.nan for g in groups], float)
+        lo   = np.array([idx_map[str(g)][ci_lo_col]   if str(g) in idx_map and ci_lo_col in idx_map[str(g)] else np.nan for g in groups], float)
+        hi   = np.array([idx_map[str(g)][ci_hi_col]   if str(g) in idx_map and ci_hi_col in idx_map[str(g)] else np.nan for g in groups], float)
 
         x = np.arange(len(groups)) + (i - n / 2 + 0.5) * width
         ax.bar(x, vals, width * 0.9, label=name, color=color, edgecolor="black", linewidth=0.5)
@@ -131,7 +132,7 @@ def multi_barplot(
 # ─── comparison analyses ───────────────────────────────────────────────────────
 
 def compare_by_group(
-    model_dfs:   List[pd.DataFrame],
+    model_dirs:  List[str],
     model_names: List[str],
     group_col:   str,
     groups:      Optional[List],
@@ -140,34 +141,26 @@ def compare_by_group(
     title:       str,
     colors,
     xlabels:    Optional[List[str]] = None,
-    n_boot:     int = 200,
-    seed:       int = 0,
     height:     float = H_WIDE,
     rotation:   int = 20,
     ha:         str = "right",
     legend_loc: str = "upper right",
 ) -> None:
-    metrics_by_model: Dict[str, pd.DataFrame] = {}
-    all_rows = []
+    metrics_by_model = load_model_metrics(model_dirs, model_names, tag)
 
-    for df, name in zip(model_dfs, model_names):
-        if group_col not in df.columns:
-            log.warning("%s: column '%s' not in residue_table — skipping", name, group_col)
-            continue
-        m = compute_group_aucpr(df, group_col, groups=groups, n_boot=n_boot, seed=seed)
-        m.insert(0, "model", name)
-        all_rows.append(m)
-        metrics_by_model[name] = m.drop(columns=["model"])
-
-    if not all_rows:
+    if not metrics_by_model:
         log.warning("no data for %s", tag)
         return
 
+    all_rows = []
+    for name, m in metrics_by_model.items():
+        m2 = m.copy()
+        m2.insert(0, "model", name)
+        all_rows.append(m2)
     pd.concat(all_rows, ignore_index=True).to_csv(
         os.path.join(out_dir, f"{tag}_comparison.csv"), index=False
     )
 
-    # resolve the actual group list for plotting
     actual_groups = groups
     if actual_groups is None:
         seen: set = set()
@@ -178,34 +171,26 @@ def compare_by_group(
     xlbls = xlabels if xlabels else [str(g) for g in actual_groups]
     fig_w = max(W_FULL, len(actual_groups) * 1.2 * max(1, len(model_names) * 0.5))
 
-    # compute normalized AUCPR: (AUCPR - prevalence) / (1 - prevalence)
-    norm_metrics_by_model: Dict[str, pd.DataFrame] = {}
-    for name, mdf in metrics_by_model.items():
-        if "prevalence" not in mdf.columns:
-            continue
-        mdf = mdf.copy()
-        p = mdf["prevalence"].clip(0, 1 - 1e-9)
-        mdf["AUCPR_norm"]       = (mdf["AUCPR"]       - p) / (1 - p)
-        mdf["AUCPR_norm_ci_lo"] = (mdf["AUCPR_ci_lo"] - p) / (1 - p)
-        mdf["AUCPR_norm_ci_hi"] = (mdf["AUCPR_ci_hi"] - p) / (1 - p)
-        norm_metrics_by_model[name] = mdf
-
     bar_kw = dict(rotation=rotation, ha=ha, legend_loc=legend_loc)
 
-    for metric, ci_lo, ci_hi, ylabel, fname_suffix, mbm in (
-        ("AUCPR",      "AUCPR_ci_lo",      "AUCPR_ci_hi",      "AUCPR",            "aucpr",      metrics_by_model),
-        ("AUCROC",     "AUCROC_ci_lo",     "AUCROC_ci_hi",     "AUC-ROC",          "aucroc",     metrics_by_model),
-        ("AUCPR_norm", "AUCPR_norm_ci_lo", "AUCPR_norm_ci_hi", "AUCPR (normalized)", "aucpr_norm", norm_metrics_by_model),
+    for metric, ci_lo, ci_hi, ylabel, fname_suffix, ylim_override in (
+        ("AUCPR",        "AUCPR_ci_lo",  "AUCPR_ci_hi",  "AUCPR",               "aucpr",      None),
+        ("AUCPR_norm",   None,           None,           "AUCPR (normalised)",  "aucpr_norm", (-0.1, 1.0)),
+        ("AUCROC",       "AUCROC_ci_lo", "AUCROC_ci_hi", "AUC-ROC",             "aucroc",     None),
+        ("max_F1",       "F1_ci_lo",     "F1_ci_hi",     "max F1",              "f1",         None),
+        ("Recall_at_F1", None,           None,           "Recall @ max F1",     "recall",     None),
     ):
-        if not any(metric in mdf.columns for mdf in mbm.values()):
+        if not any(metric in mdf.columns for mdf in metrics_by_model.values()):
             continue
+        _ci_lo = ci_lo or metric
+        _ci_hi = ci_hi or metric
         fig, ax = plt.subplots(figsize=(fig_w, height))
-        multi_barplot(ax, actual_groups, model_names, mbm, group_col, colors,
+        multi_barplot(ax, actual_groups, model_names, metrics_by_model, group_col, colors,
                       xlabels=xlbls, ylabel=ylabel,
-                      metric_col=metric, ci_lo_col=ci_lo, ci_hi_col=ci_hi,
+                      metric_col=metric, ci_lo_col=_ci_lo, ci_hi_col=_ci_hi,
                       **bar_kw)
-        if metric == "AUCPR_norm":
-            ax.set_ylim(-0.1, 1)  # normalized can go slightly negative
+        if ylim_override:
+            ax.set_ylim(*ylim_override)
             ax.axhline(0, color="gray", linestyle="--", linewidth=0.8, label="random")
         ax.set_title(f"{title} — {ylabel}", fontsize=11)
         ax.legend(fontsize=7, loc=legend_loc, framealpha=0.8)
@@ -213,7 +198,7 @@ def compare_by_group(
         fig.savefig(os.path.join(out_dir, f"{tag}_{fname_suffix}_comparison.png"), dpi=200)
         plt.close(fig)
 
-    log.info("saved %s_{aucpr,aucroc,aucpr_norm}_comparison.*", tag)
+    log.info("saved %s_{aucpr,aucpr_norm,aucroc,f1,recall}_comparison.*", tag)
 
 
 def _aa_heatmap(all_metrics: Dict[str, pd.DataFrame], metric_col: str,
@@ -242,42 +227,41 @@ def _aa_heatmap(all_metrics: Dict[str, pd.DataFrame], metric_col: str,
 
 
 def compare_aa_heatmap(
-    model_dfs:   List[pd.DataFrame],
+    model_dirs:  List[str],
     model_names: List[str],
     out_dir:     str,
-    n_boot:      int = 200,
-    seed:        int = 0,
 ) -> None:
-    all_metrics: Dict[str, pd.DataFrame] = {}
-    for df, name in zip(model_dfs, model_names):
-        if "aa" not in df.columns:
-            continue
-        all_metrics[name] = compute_group_aucpr(df, "aa", groups=AA_ORDER, n_boot=n_boot, seed=seed)
-
+    all_metrics = load_model_metrics(model_dirs, model_names, "aa")
     if not all_metrics:
         log.warning("no AA data for heatmap")
         return
-
     _aa_heatmap(all_metrics, "AUCPR",  model_names, out_dir, "aa_aucpr_heatmap",  "AUCPR")
     _aa_heatmap(all_metrics, "AUCROC", model_names, out_dir, "aa_aucroc_heatmap", "AUC-ROC")
     log.info("saved aa_aucpr_heatmap.* and aa_aucroc_heatmap.*")
 
 
 def compare_pr_curves_by_rsa(
-    model_dfs:   List[pd.DataFrame],
+    model_dirs:  List[str],
     model_names: List[str],
     colors,
     out_dir:     str,
-    n_boot:      int = 200,
-    seed:        int = 0,
 ) -> None:
-    # ── PR curves (one sub-panel per RSA bin) ──────────────────────────────────
+    # ── PR curves (one sub-panel per RSA bin) — load residue_table.csv here ───
+    model_dfs = []
+    for d, name in zip(model_dirs, model_names):
+        rt = os.path.join(d, "residue_table.csv")
+        if not os.path.exists(rt):
+            log.warning("%s: residue_table.csv not found — PR curves will be partial", name)
+            model_dfs.append(pd.DataFrame())
+        else:
+            model_dfs.append(load_residue_table(rt))
+
     fig, axes = plt.subplots(1, len(RSA_LABELS), figsize=(4.5 * len(RSA_LABELS), 4.5))
 
     for ax, rsa_bin, short_label in zip(axes, RSA_LABELS, RSA_BIN_SHORT):
         baseline_vals = []
         for df, name, color in zip(model_dfs, model_names, colors):
-            if "rsa_bin" not in df.columns:
+            if df.empty or "rsa_bin" not in df.columns:
                 continue
             sub = df[(df["rsa_bin"].astype(str) == rsa_bin)
                      & df["y_true"].notna() & df["y_pred"].notna()].copy()
@@ -310,14 +294,13 @@ def compare_pr_curves_by_rsa(
     plt.close(fig)
     log.info("saved pr_curves_by_rsa_bin.png")
 
-    # ── AUCPR + AUCROC + normalized AUCPR barplot per RSA bin ─────────────────
+    # ── barplot from pre-computed metrics ──────────────────────────────────────
     compare_by_group(
-        model_dfs=model_dfs, model_names=model_names,
+        model_dirs=model_dirs, model_names=model_names,
         group_col="rsa_bin", groups=RSA_LABELS,
         out_dir=out_dir, tag="rsa_bin",
         title="by RSA bin",
         colors=colors, xlabels=RSA_BIN_SHORT,
-        n_boot=n_boot, seed=seed,
         height=4.5, rotation=0, ha="center", legend_loc="upper left",
     )
     log.info("saved rsa_bin_{aucpr,aucroc,aucpr_norm}_comparison.*")
@@ -330,13 +313,10 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--model_dirs",  nargs="+", required=True,
-                    help="Dirs containing residue_table.csv (produced by stratify.py)")
+                    help="Dirs containing metrics_by_*.csv files (produced by stratify.py)")
     ap.add_argument("--model_names", nargs="+", default=None,
                     help="Display names (same order as --model_dirs; defaults to dir basenames)")
     ap.add_argument("--out_dir",     required=True)
-    ap.add_argument("--n_boot",      type=int, default=200,
-                    help="Bootstrap samples for CI (0 disables CI)")
-    ap.add_argument("--seed",        type=int, default=0)
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -347,19 +327,8 @@ def main() -> None:
     model_names = args.model_names or [os.path.basename(d.rstrip("/")) for d in args.model_dirs]
     colors      = plt.cm.tab10(np.linspace(0, 0.9, len(model_names)))
 
-    # load residue tables
-    model_dfs = []
-    for d, name in zip(args.model_dirs, model_names):
-        rt = os.path.join(d, "residue_table.csv")
-        if not os.path.exists(rt):
-            raise FileNotFoundError(f"residue_table.csv not found in {d}")
-        df = load_residue_table(rt)
-        model_dfs.append(df)
-        log.info("loaded %s: %d rows, %d chains", name, len(df), df["Sequence_ID"].nunique())
-
-    kw = dict(model_dfs=model_dfs, model_names=model_names,
-              out_dir=args.out_dir, colors=colors,
-              n_boot=args.n_boot, seed=args.seed)
+    kw = dict(model_dirs=args.model_dirs, model_names=model_names,
+              out_dir=args.out_dir, colors=colors)
 
     log.info("[1] PDB vs AF")
     compare_by_group(group_col="model_source", groups=["AF", "PDB"],
@@ -368,7 +337,7 @@ def main() -> None:
     log.info("[2] Amino acid")
     compare_by_group(group_col="aa", groups=AA_ORDER,
                      tag="aa", title="By amino acid", **kw)
-    compare_aa_heatmap(model_dfs, model_names, args.out_dir, n_boot=args.n_boot, seed=args.seed)
+    compare_aa_heatmap(args.model_dirs, model_names, args.out_dir)
 
     log.info("[3] EC top-level class")
     compare_by_group(group_col="ec_top", groups=None,
@@ -380,9 +349,9 @@ def main() -> None:
     compare_by_group(group_col="chemotype", groups=chem_groups, xlabels=chem_labels,
                      tag="chemotype", title="By chemotype", **kw)
 
-    log.info("[5] PR curves + AUCPR/AUCROC by RSA bin")
-    compare_pr_curves_by_rsa(model_dfs, model_names, colors, args.out_dir,
-                              n_boot=args.n_boot, seed=args.seed)
+    log.info("[5] PR curves + metrics by RSA bin")
+    compare_pr_curves_by_rsa(model_dirs=args.model_dirs, model_names=model_names,
+                              colors=colors, out_dir=args.out_dir)
 
     log.info("all outputs in %s", args.out_dir)
 

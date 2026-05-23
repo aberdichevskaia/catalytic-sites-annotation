@@ -1,39 +1,29 @@
-aa_attributes=("esm2") #  "sequence"  "pwm" 
+aa_attributes=("pwm" ) #  "sequence"  "pwm" 
 
-configs=("09")  # "00" "01" "02" "03" "04" "05" "06" "07"
+configs=("10")  # "00" "01" "02" "03" "04" "05" "06" "07"
 
-graphs=("graphV1" "graphV2")
+graphs=("graphV2")
 
 for aa_attribute in "${aa_attributes[@]}"
 do
   for cfg in "${configs[@]}"
   do
-    base_name="ablate${cfg}_esm2_CataloDB_3B_graphV2"  
+    base_name="ablate${cfg}_${aa_attribute}_final_3B_graphV2"  
 
     python /home/iscb/wolfson/annab4/catalytic-sites-annotation/prediction_results_analysis/evaluate_results.py seeds \
       --base_dir /home/iscb/wolfson/annab4/scannet_retrains \
       --save_dir /home/iscb/wolfson/annab4/scannet_retrains/seeds/${base_name} \
       --run_tpl "${base_name}_fold{fold}_v{version}" \
-      --versions 1 2 3 4 5 6 \
+      --versions 1 2 3 4 5 6 7 8 9 10 11 12 \
       --subsets validation_results test_results \
       --max_k 10 \
       #--baseline_base_dir /path/to/baseline_runs \
       #--baseline_run_tpl "baseline_fixed/results_adaptive_cutoff_cv{fold}"
   done
 
-
-  # base_name="default_${aa_attribute}" 
-
-  # python /home/iscb/wolfson/annab4/catalytic-sites-annotation/prediction_results_analysis/evaluate_results.py seeds \
-  #   --base_dir /home/iscb/wolfson/annab4/scannet_retrains \
-  #   --save_dir /home/iscb/wolfson/annab4/scannet_retrains/seeds/${base_name} \
-  #   --run_tpl "${base_name}_fold{fold}_v{version}" \
-  #   --versions 1 2 3 4 5 6 7 8 9 10 11 12 \
-  #   --subsets validation_results test_results \
-  #   --max_k 10 
 done
 
-# 
+ 
 
 # base_name="ablate05_esm2_3B_graphV2"      #"ablate01_esm2_3B_graphV1"
 
